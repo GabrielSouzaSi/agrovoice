@@ -10,25 +10,28 @@ import {
 	Alert,
 } from "react-native"
 import { Cloud, Play, Pause, Trash } from "lucide-react-native"
-import { delRecorderId, getRecorders } from "@/database/recorder"
+import { delPragaId, getPraga } from "@/database/praga"
 import { RecorderDTO } from "@/dtos/recorderDTO"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import * as FileSystem from "expo-file-system"
-import { useFocusEffect } from "expo-router"
+import { useRouter, useFocusEffect } from "expo-router"
+import { PragaDTO } from "@/dtos/pragaDTO"
 
+
+const router = useRouter();
 export default function RecordingsScreen() {
 	const [selectedRecording, setSelectedRecording] = useState<number | null>(null)
 	const [syncModalVisible, setSyncModalVisible] = useState(false)
 	const [collection, setCollection] = useState("")
 	const [property, setProperty] = useState("")
-	const [recordings, setRecordings] = useState<RecorderDTO[]>([])
+	const [praga, setPraga] = useState<PragaDTO[]>([])
 	const [playingRecordingId, setPlayingRecordingId] = useState<number | null>(null)
 
 	// Player único (sem fonte inicial)
 	const player = useAudioPlayer(null)
 	const status = useAudioPlayerStatus(player) // { isPlaying, duration, currentTime, ... }
 
-	const getItemById = (id: number) => recordings.find((r) => r.id === id)
+	const getItemById = (id: number) => praga.find((r) => r.id === id)
 
 	// PLAY/PAUSE
 	const handlePlayback = async (id: number) => {
@@ -84,7 +87,7 @@ export default function RecordingsScreen() {
 					datetime: String(item.datetime),
 					collection,
 					property,
-					transcription: item.transcription ?? "",
+					transcription: item.description ?? "",
 				},
 				headers: {
 					// Authorization: `Bearer ${token}`,
@@ -108,7 +111,7 @@ export default function RecordingsScreen() {
 	}
 
 	// DELETE
-	const deleteRecording = async (item: RecorderDTO) => {
+	const deleteRecording = async (item: PragaDTO) => {
 		player.pause()
 		Alert.alert("Atenção", `Deseja remover ${item.name}?`, [
 			{ text: "Não", onPress: () => {} },
@@ -121,9 +124,9 @@ export default function RecordingsScreen() {
 		])
 	}
 
-	const delRecording = async (item: RecorderDTO) => {
+	const delRecording = async (item: PragaDTO) => {
 		try {
-			await delRecorderId(item.id)
+			await delPragaId(item.id)
 
 			await FileSystem.deleteAsync(item.file, { idempotent: true })
 			Alert.alert("Sucesso", "Gravação removida.")
@@ -136,22 +139,32 @@ export default function RecordingsScreen() {
 	}
 
 	const fetchRecordings = async () => {
-		const data = await getRecorders()
-		setRecordings(data)
+		const data = await getPraga()
+		setPraga(data)
 	}
+	const handleNavigateToDetails = ({ item }: { item: PragaDTO }) => {
+	
+		router.push({
+			pathname: `/details/praga_details`,
+			
+			// Passa o objeto completo. O router serializa isso em strings.
+			// Usamos 'as any' para evitar erros de tipagem, já que o router converte tudo para string.
+			params: item as any, 
+		});
+	};
 
-	const renderItem = ({ item }: { item: RecorderDTO }) => (
-		<View style={styles.recordingItem}>
+	const renderItem = ({ item }: { item: PragaDTO }) => (
+		<TouchableOpacity onPress={() => handleNavigateToDetails({ item })}><View style={styles.recordingItem}>
 			<View style={styles.recordingInfo}>
-				<Text style={styles.timestamp}>{item.name}</Text>
-				<Text style={styles.location}>{item.location}</Text>
+				<Text style={styles.timestamp}>{item.praga}</Text>
+				<Text style={styles.location}>{item.fazenda}</Text>
 				{/* {item.collection && (
 					<Text style={styles.collection}>
 						Collection: {item.collection} - Property: {item.property}
 					</Text>
 				)} */}
-				{item.transcription && (
-					<Text style={styles.transcription}>"{item.transcription}"</Text>
+				{item.description && (
+					<Text style={styles.transcription}>"{item.description}"</Text>
 				)}
 			</View>
 
@@ -185,6 +198,7 @@ export default function RecordingsScreen() {
 				</TouchableOpacity>
 			</View>
 		</View>
+		</TouchableOpacity>
 	)
 
 	useFocusEffect(
@@ -198,7 +212,7 @@ export default function RecordingsScreen() {
 			<Text style={styles.title}>Recordings</Text>
 
 			<FlatList
-				data={recordings}
+				data={praga}
 				renderItem={renderItem}
 				keyExtractor={(item) => item.name}
 				contentContainerStyle={styles.list}

@@ -1,18 +1,37 @@
 import { Tabs } from "expo-router"
 import { Mic, List, Settings } from "lucide-react-native"
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+const COLORS = {
+	background: '#111827', // Um cinza bem escuro (gray-900)
+	activeTint: '#4ade80', // Um verde de destaque (green-400)
+	inactiveTint: '#9ca3af', // Um cinza mais claro (gray-400)
+  };
+
 
 export default function TabLayout() {
 	return (
+		<GestureHandlerRootView style={{ flex: 1 }}>
 		<Tabs
 			screenOptions={{
+				// Oculta o cabeçalho nativo da tela
 				headerShown: false,
+				
+				// 1. FUNDO DA TAB BAR: Torna a Tab Bar nativa invisível
 				tabBarStyle: {
-					backgroundColor: "#1a1a1a",
-					borderTopColor: "#333",
+				  backgroundColor: 'transparent', // Fundo transparente
+				  borderTopWidth: 0,              // Remove a linha superior
+				  elevation: 0,                   // Remove a sombra no Android
+				  shadowOpacity: 0,               // Remove a sombra no iOS
+				  position: 'absolute',           // Permite que a barra flutue
+				  bottom: 20,                     // Eleva a barra um pouco acima da base
+				  left: 20,
+				  right: 20,
 				},
-				tabBarActiveTintColor: "#00ff00",
-				tabBarInactiveTintColor: "#888",
-			}}
+				
+				// 2. CONFIGURAÇÃO DE ÍCONES/LABEL: Define cores base
+				tabBarActiveTintColor: COLORS.activeTint, // Roxo de destaque (para os ícones laterais)
+				tabBarInactiveTintColor: COLORS.inactiveTint, // Cinza claro (para os ícones laterais)
+			  }}
 		>
 			<Tabs.Screen
 				name="index"
@@ -36,5 +55,6 @@ export default function TabLayout() {
 				}}
 			/>
 		</Tabs>
+		</GestureHandlerRootView>
 	)
 }

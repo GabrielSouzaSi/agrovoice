@@ -16,6 +16,7 @@ import { useMigrations } from "drizzle-orm/expo-sqlite/migrator"
 import { useDrizzleStudio } from "expo-drizzle-studio-plugin"
 import { DATABASE_NAME, db, expoDb } from "@/database/connection"
 import migrations from "../../drizzle/migrations.js"
+import React from "react"
 
 // Prevent the splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync()
@@ -60,5 +61,6 @@ export default function RootLayout() {
 		<SQLiteProvider databaseName={DATABASE_NAME}>
 			<RootLayoutNav />
 		</SQLiteProvider>
+		
 	)
 }
