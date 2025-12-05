@@ -1,74 +1,56 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, StatusBar, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Edit, Trash2, CloudUpload } from 'lucide-react-native';
-import { colors } from '@/styles/colors';
+import { Edit, Trash2, CloudUpload, MapPin, Calendar, FileText, ArrowLeft } from 'lucide-react-native';
 import { PragaDTO } from '@/dtos/pragaDTO';
-import React from 'react';
+import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 
-
-
-const ActionButtons = ({ onDelete, onEdit, onSync }: { onDelete: () => void, onEdit: () => void, onSync: () => void }) => (
-    <View className="flex-row justify-around p-4 border-t border-gray-700 bg-gray-900">
-        <TouchableOpacity onPress={onEdit} className="p-3 items-center">
-            <Edit size={24} color={colors.blue[400]} />
-            <Text className="text-yellow-500 text-xs mt-1">Editar</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity onPress={onDelete} className="p-3 items-center">
-            <Trash2 size={24} color={colors.red[500]} />
-            <Text className="text-red-500 text-xs mt-1">Deletar</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={onSync} className="p-3 items-center">
-            <CloudUpload size={24} color={colors.green[500]} />
-            <Text className="text-green-500 text-xs mt-1">Sincronizar</Text>
-        </TouchableOpacity>
-    </View>
-);
-
+const { width } = Dimensions.get('window');
 
 export default function PragaDetailScreen() {
     const router = useRouter();
-    
     const params = useLocalSearchParams();
-    
-   
     const item: PragaDTO = params as unknown as PragaDTO;
-    
+
     if (!item.id) {
         return (
-            <View className="flex-1 justify-center items-center bg-gray-900">
-                <Text className="text-white">Item não encontrado.</Text>
+            <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Item não encontrado.</Text>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                    <Text style={styles.backButtonText}>Voltar</Text>
+                </TouchableOpacity>
             </View>
         );
     }
-    
-   
+
+    // Parse location
+    const [lat, long] = item.location ? item.location.split(',').map(Number) : [0, 0];
+    const hasLocation = !isNaN(lat) && !isNaN(long) && lat !== 0 && long !== 0;
+
     const handleDelete = () => {
         Alert.alert("Confirmação", "Tem certeza que deseja deletar este registro?", [
             { text: "Cancelar", style: "cancel" },
-            { 
-                text: "Deletar", 
+            {
+                text: "Deletar",
                 onPress: () => {
-                    // ⚠️ Lógica de exclusão no banco de dados aqui
-                    console.log(`Deletando item com ID: ${item.id}`);
-                    router.back(); // Volta para a tela anterior após deletar
+                    console.log(`Deletando item com ID: ${item.id} `);
+                    router.back();
                 },
                 style: "destructive"
             },
         ]);
     };
-    
+
     const handleEdit = () => {
-        console.log(`Editando item com ID: ${item.id}`);
+        console.log(`Editando item com ID: ${item.id} `);
     };
-    
+
     const handleSync = () => {
-        console.log(`Sincronizando item com ID: ${item.id}`);
+        console.log(`Sincronizando item com ID: ${item.id} `);
         Alert.alert("Sincronização", "Registro enviado para o servidor!");
     };
 
-    // Função auxiliar para formatar a data/hora
     const formatDate = (dateString: string) => {
         try {
             return new Date(dateString).toLocaleString('pt-BR');
@@ -77,39 +59,100 @@ export default function PragaDetailScreen() {
         }
     }
 
-    const DetailField = ({ label, value }: { label: string, value: string }) => (
-        <View className="mb-4 p-3 bg-gray-800 rounded-lg">
-            <Text className="text-gray-400 font-medium text-xs uppercase">{label}</Text>
-            <Text className="text-white-500 text-base mt-1">{value}</Text>
-        </View>
-    );
-
     return (
         <View style={styles.container}>
-            <View className="p-5 flex-1">
-                <Text className="text-2xl font-bold text-white-500 mb-6">
-                    Detalhes da Gravação #{item.id}
-                </Text>
+            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-                <View className="flex-1">
-                    <DetailField label="Nome da Praga" value={item.praga || "N/A"} />
-                    <DetailField label="Fazenda/Local" value={item.fazenda || "N/A"} />
-                    <DetailField label="Descrição" value={item.description || "Nenhuma descrição."} />
-                    <DetailField label="Data e Hora" value={formatDate(item.datetime)} />
-                    <DetailField 
-                        label="Localização GPS" 
-                        value={item.location.split(',').join(', ') || "Localização indisponível"} 
-                    />
-                </View>
-                
+            {/* Map Header */}
+            <View style={styles.mapContainer}>
+                {hasLocation ? (
+                    <MapView
+                        style={styles.map}
+                        provider={PROVIDER_DEFAULT}
+                        initialRegion={{
+                            latitude: lat,
+                            longitude: long,
+                            latitudeDelta: 0.005,
+                            longitudeDelta: 0.005,
+                        }}
+                    >
+                        <Marker
+                            coordinate={{ latitude: lat, longitude: long }}
+                            title={item.praga}
+                            description={item.fazenda}
+                        />
+                    </MapView>
+                ) : (
+                    <View style={styles.noMapContainer}>
+                        <MapPin size={48} color="#52525b" />
+                        <Text style={styles.noMapText}>Localização indisponível</Text>
+                    </View>
+                )}
+
+                {/* Back Button Overlay */}
+                <TouchableOpacity
+                    style={styles.headerBackButton}
+                    onPress={() => router.back()}
+                >
+                    <ArrowLeft size={24} color="#fff" />
+                </TouchableOpacity>
             </View>
-            <View className='left-0 bottom-10 right-0'>
-            
-            <ActionButtons 
-                onDelete={handleDelete} 
-                onEdit={handleEdit} 
-                onSync={handleSync} 
-            />
+
+            <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+                <View style={styles.headerInfo}>
+                    <Text style={styles.title}>{item.praga || "Praga Desconhecida"}</Text>
+                    <View style={styles.dateRow}>
+                        <Calendar size={14} color="#a1a1aa" />
+                        <Text style={styles.dateText}>{formatDate(item.datetime)}</Text>
+                    </View>
+                </View>
+
+                <View style={styles.card}>
+                    <View style={styles.cardRow}>
+                        <MapPin size={20} color="#2ecc71" />
+                        <View style={styles.cardTextContainer}>
+                            <Text style={styles.cardLabel}>Local</Text>
+                            <Text style={styles.cardValue}>{item.fazenda || "Não informado"}</Text>
+                            {hasLocation && <Text style={styles.coordsText}>{lat.toFixed(6)}, {long.toFixed(6)}</Text>}
+                        </View>
+                    </View>
+                </View>
+
+                <View style={styles.card}>
+                    <View style={styles.cardRow}>
+                        <FileText size={20} color="#3b82f6" />
+                        <View style={styles.cardTextContainer}>
+                            <Text style={styles.cardLabel}>Descrição / Transcrição</Text>
+                            <Text style={styles.descriptionText}>
+                                {item.description ? `"${item.description}"` : "Nenhuma descrição disponível."}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            </ScrollView>
+
+            {/* Bottom Actions */}
+            <View style={styles.bottomBar}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleEdit}>
+                    <View style={[styles.iconCircle, { backgroundColor: "rgba(59, 130, 246, 0.1)" }]}>
+                        <Edit size={24} color="#3b82f6" />
+                    </View>
+                    <Text style={styles.actionText}>Editar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionButton} onPress={handleSync}>
+                    <View style={[styles.iconCircle, { backgroundColor: "rgba(34, 197, 94, 0.1)" }]}>
+                        <CloudUpload size={24} color="#22c55e" />
+                    </View>
+                    <Text style={styles.actionText}>Sincronizar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionButton} onPress={handleDelete}>
+                    <View style={[styles.iconCircle, { backgroundColor: "rgba(239, 68, 68, 0.1)" }]}>
+                        <Trash2 size={24} color="#ef4444" />
+                    </View>
+                    <Text style={[styles.actionText, { color: "#ef4444" }]}>Excluir</Text>
+                </TouchableOpacity>
             </View>
         </View>
     );
@@ -118,6 +161,152 @@ export default function PragaDetailScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: colors.gray[1000],
+        backgroundColor: "#fff", // Zinc 950
+    },
+    errorContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: "#09090b",
+    },
+    errorText: {
+        color: "#000",
+        fontSize: 18,
+        marginBottom: 20,
+    },
+    backButton: {
+        padding: 10,
+        backgroundColor: "#27272a",
+        borderRadius: 8,
+    },
+    backButtonText: {
+        color: "#000",
+    },
+    mapContainer: {
+        height: 300,
+        width: '100%',
+        backgroundColor: "#18181b",
+        position: 'relative',
+    },
+    map: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    noMapContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    noMapText: {
+        color: "#52525b",
+        marginTop: 10,
+        fontFamily: "Inter_500Medium",
+    },
+    headerBackButton: {
+        position: 'absolute',
+        top: 50,
+        left: 20,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    content: {
+        flex: 1,
+    },
+    scrollContent: {
+        padding: 20,
+        paddingBottom: 100,
+    },
+    headerInfo: {
+        marginBottom: 24,
+    },
+    title: {
+        fontSize: 32,
+        fontFamily: "Inter_700Bold",
+        color: "#000",
+        marginBottom: 8,
+    },
+    dateRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    dateText: {
+        color: "#000",
+        fontSize: 14,
+        fontFamily: "Inter_400Regular",
+    },
+    card: {
+        backgroundColor: "#fff", // Zinc 900
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: "#27272a",
+    },
+    cardRow: {
+        flexDirection: 'row',
+        gap: 16,
+    },
+    cardTextContainer: {
+        flex: 1,
+    },
+    cardLabel: {
+        color: "#000", // Zinc 400
+        fontSize: 15,
+        fontFamily: "Inter_500Medium",
+        marginBottom: 4,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    cardValue: {
+        color: "#000",
+        fontSize: 18,
+        fontFamily: "Inter_600SemiBold",
+    },
+    coordsText: {
+        color: "#000",
+        fontSize: 12,
+        fontFamily: "Inter_400Regular",
+        marginTop: 2,
+    },
+    descriptionText: {
+        color: "#000", // Zinc 300
+        fontSize: 16,
+        fontFamily: "Inter_400Regular",
+        fontStyle: 'italic',
+        lineHeight: 24,
+    },
+    bottomBar: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: "#000", // Zinc 900
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingVertical: 16,
+        paddingBottom: 32,
+        borderTopWidth: 1,
+        borderTopColor: "#27272a",
+    },
+    actionButton: {
+        alignItems: 'center',
+        gap: 8,
+    },
+    iconCircle: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    actionText: {
+        color: "#000",
+        fontSize: 12,
+        fontFamily: "Inter_500Medium",
     },
 });

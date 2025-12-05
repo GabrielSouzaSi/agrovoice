@@ -48,7 +48,8 @@ function RootLayoutNav() {
 
 	return (
 		<>
-			<Stack screenOptions={{ headerShown: false }}>
+			<Stack screenOptions={{ headerShown: false }} initialRouteName="login/login_page">
+				<Stack.Screen name="login/login_page" />
 				<Stack.Screen name="(tabs)" />
 			</Stack>
 			<StatusBar style="light" />
@@ -61,6 +62,5 @@ export default function RootLayout() {
 		<SQLiteProvider databaseName={DATABASE_NAME}>
 			<RootLayoutNav />
 		</SQLiteProvider>
-		
 	)
 }

@@ -8,17 +8,17 @@ import {
 	Modal,
 	TextInput,
 	Alert,
+	StatusBar,
 } from "react-native"
-import { Cloud, Play, Pause, Trash } from "lucide-react-native"
+import { Cloud, Play, Pause, Trash, Calendar, MapPin } from "lucide-react-native"
 import { delPragaId, getPraga } from "@/database/praga"
-import { RecorderDTO } from "@/dtos/recorderDTO"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import * as FileSystem from "expo-file-system"
 import { useRouter, useFocusEffect } from "expo-router"
 import { PragaDTO } from "@/dtos/pragaDTO"
 
-
 const router = useRouter();
+
 export default function RecordingsScreen() {
 	const [selectedRecording, setSelectedRecording] = useState<number | null>(null)
 	const [syncModalVisible, setSyncModalVisible] = useState(false)
@@ -27,35 +27,30 @@ export default function RecordingsScreen() {
 	const [praga, setPraga] = useState<PragaDTO[]>([])
 	const [playingRecordingId, setPlayingRecordingId] = useState<number | null>(null)
 
-	// Player único (sem fonte inicial)
 	const player = useAudioPlayer(null)
-	const status = useAudioPlayerStatus(player) // { isPlaying, duration, currentTime, ... }
+	const status = useAudioPlayerStatus(player)
 
 	const getItemById = (id: number) => praga.find((r) => r.id === id)
 
-	// PLAY/PAUSE
 	const handlePlayback = async (id: number) => {
 		try {
 			const item = getItemById(id)
 			if (!item) return
 
-			// Se já é o atual
 			if (playingRecordingId === id) {
 				if (status?.playing) {
 					await player.pause()
 					setPlayingRecordingId(null)
 					return
 				} else {
-					// “Replay” ou retomar
-					await player.seekTo(0) // expo-audio não volta sozinho ao início
+					await player.seekTo(0)
 					await player.play()
 					setPlayingRecordingId(id)
 					return
 				}
 			}
 
-			// Troca a fonte e toca
-			await player.replace({ uri: item.file }) // file:///…m4a
+			await player.replace({ uri: item.file })
 			await player.seekTo(0)
 			await player.play()
 			setPlayingRecordingId(id)
@@ -66,7 +61,6 @@ export default function RecordingsScreen() {
 		}
 	}
 
-	// SYNC (exemplo multipart)
 	const handleSync = async (id: number) => {
 		try {
 			const item = getItemById(id)
@@ -89,9 +83,6 @@ export default function RecordingsScreen() {
 					property,
 					transcription: item.description ?? "",
 				},
-				headers: {
-					// Authorization: `Bearer ${token}`,
-				},
 			})
 
 			if (res.status >= 200 && res.status < 300) {
@@ -101,7 +92,6 @@ export default function RecordingsScreen() {
 				setCollection("")
 				setProperty("")
 			} else {
-				console.log("Upload response:", res)
 				Alert.alert("Erro", "Falha ao sincronizar. Verifique o servidor.")
 			}
 		} catch (e) {
@@ -110,11 +100,10 @@ export default function RecordingsScreen() {
 		}
 	}
 
-	// DELETE
 	const deleteRecording = async (item: PragaDTO) => {
 		player.pause()
 		Alert.alert("Atenção", `Deseja remover ${item.name}?`, [
-			{ text: "Não", onPress: () => {} },
+			{ text: "Não", onPress: () => { } },
 			{
 				text: "Sim",
 				onPress: () => {
@@ -127,9 +116,7 @@ export default function RecordingsScreen() {
 	const delRecording = async (item: PragaDTO) => {
 		try {
 			await delPragaId(item.id)
-
 			await FileSystem.deleteAsync(item.file, { idempotent: true })
-			Alert.alert("Sucesso", "Gravação removida.")
 			fetchRecordings()
 			setPlayingRecordingId(null)
 		} catch (e) {
@@ -140,64 +127,84 @@ export default function RecordingsScreen() {
 
 	const fetchRecordings = async () => {
 		const data = await getPraga()
-		setPraga(data)
+		setPraga(data.reverse()) // Show newest first
 	}
+
 	const handleNavigateToDetails = ({ item }: { item: PragaDTO }) => {
-	
 		router.push({
 			pathname: `/details/praga_details`,
-			
-			// Passa o objeto completo. O router serializa isso em strings.
-			// Usamos 'as any' para evitar erros de tipagem, já que o router converte tudo para string.
-			params: item as any, 
+			params: item as any,
 		});
 	};
 
+	const formatDate = (dateString: string) => {
+		try {
+			const date = new Date(dateString);
+			return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+		} catch {
+			return dateString;
+		}
+	}
+
 	const renderItem = ({ item }: { item: PragaDTO }) => (
-		<TouchableOpacity onPress={() => handleNavigateToDetails({ item })}><View style={styles.recordingItem}>
-			<View style={styles.recordingInfo}>
-				<Text style={styles.timestamp}>{item.praga}</Text>
-				<Text style={styles.location}>{item.fazenda}</Text>
-				{/* {item.collection && (
-					<Text style={styles.collection}>
-						Collection: {item.collection} - Property: {item.property}
-					</Text>
-				)} */}
+		<TouchableOpacity
+			activeOpacity={0.9}
+			onPress={() => handleNavigateToDetails({ item })}
+			style={styles.card}
+		>
+			<View style={styles.cardHeader}>
+				<View style={styles.headerLeft}>
+					<Text style={styles.pestName}>{item.praga || "Praga Desconhecida"}</Text>
+					<View style={styles.dateContainer}>
+						<Calendar size={12} color="#888" />
+						<Text style={styles.dateText}>{formatDate(item.datetime)}</Text>
+					</View>
+				</View>
+				{/* Status indicator or menu could go here */}
+			</View>
+
+			<View style={styles.cardBody}>
+				<View style={styles.locationContainer}>
+					<MapPin size={14} color="#2ecc71" />
+					<Text style={styles.locationText}>{item.fazenda || "Localização não definida"}</Text>
+				</View>
+
 				{item.description && (
-					<Text style={styles.transcription}>"{item.description}"</Text>
+					<Text style={styles.description} numberOfLines={2}>
+						"{item.description}"
+					</Text>
 				)}
 			</View>
 
-			<View style={styles.actions}>
+			<View style={styles.cardFooter}>
 				<TouchableOpacity
-					style={[styles.actionButton, { backgroundColor: "#3498db" }]}
-					onPress={() => handlePlayback(item.id)}
+					style={styles.playButton}
+					onPress={(e) => {
+						e.stopPropagation();
+						handlePlayback(item.id);
+					}}
 				>
-					{playingRecordingId === item.id ? (
-						<Pause size={20} color="#fff" />
+					{playingRecordingId === item.id && status?.playing ? (
+						<Pause size={20} color="#000" fill="#000" />
 					) : (
-						<Play size={20} color="#fff" />
+						<Play size={20} color="#fff" fill="#fff" />
 					)}
 				</TouchableOpacity>
 
-				<TouchableOpacity
-					style={[styles.actionButton, { backgroundColor: "#2ecc71" }]}
-					onPress={() => {
-						setSelectedRecording(item.id)
-						setSyncModalVisible(true)
-					}}
-				>
-					<Cloud size={20} color="#fff" />
-				</TouchableOpacity>
+				<View style={styles.actionsRight}>
 
-				<TouchableOpacity
-					style={[styles.actionButton, { backgroundColor: "#e74c3c" }]}
-					onPress={() => deleteRecording(item)}
-				>
-					<Trash size={20} color="#fff" />
-				</TouchableOpacity>
+
+					<TouchableOpacity
+						style={[styles.iconButton, styles.deleteButton]}
+						onPress={(e) => {
+							e.stopPropagation();
+							deleteRecording(item);
+						}}
+					>
+						<Trash size={20} color="#ef4444" />
+					</TouchableOpacity>
+				</View>
 			</View>
-		</View>
 		</TouchableOpacity>
 	)
 
@@ -209,62 +216,53 @@ export default function RecordingsScreen() {
 
 	return (
 		<View style={styles.container}>
-			<Text style={styles.title}>Recordings</Text>
+			<StatusBar barStyle="light-content" />
+			<View style={styles.header}>
+				<Text style={styles.title}>Minhas Coletas</Text>
+				<Text style={styles.subtitle}>{praga.length} registros encontrados</Text>
+			</View>
 
 			<FlatList
 				data={praga}
 				renderItem={renderItem}
-				keyExtractor={(item) => item.name}
+				keyExtractor={(item) => String(item.id)}
 				contentContainerStyle={styles.list}
+				showsVerticalScrollIndicator={false}
 			/>
 
 			<Modal
 				visible={syncModalVisible}
-				animationType="slide"
+				animationType="fade"
 				transparent={true}
 				onRequestClose={() => setSyncModalVisible(false)}
 			>
-				<View style={styles.modalContainer}>
+				<View style={styles.modalOverlay}>
 					<View style={styles.modalContent}>
-						<Text style={styles.modalTitle}>Sync Recording</Text>
+						<Text style={styles.modalTitle}>Sincronizar Coleta</Text>
 
-						<View style={styles.inputContainer}>
-							<Text style={styles.label}>Collection Name</Text>
+						<View style={styles.inputGroup}>
+							<Text style={styles.label}>Coleção</Text>
 							<TextInput
 								style={styles.input}
 								value={collection}
 								onChangeText={setCollection}
-								placeholder="Enter collection name"
+								placeholder="Nome da coleção"
 								placeholderTextColor="#666"
 							/>
 						</View>
 
-						<View style={styles.inputContainer}>
-							<Text style={styles.label}>Property Name</Text>
+						<View style={styles.inputGroup}>
+							<Text style={styles.label}>Propriedade</Text>
 							<TextInput
 								style={styles.input}
 								value={property}
 								onChangeText={setProperty}
-								placeholder="Enter property name"
+								placeholder="Nome da propriedade"
 								placeholderTextColor="#666"
 							/>
 						</View>
 
-						<View style={styles.modalActions}>
-							<TouchableOpacity
-								style={[styles.modalButton, styles.cancelButton]}
-								onPress={() => setSyncModalVisible(false)}
-							>
-								<Text style={styles.buttonText}>Cancel</Text>
-							</TouchableOpacity>
 
-							<TouchableOpacity
-								style={[styles.modalButton, styles.syncButton]}
-								onPress={() => selectedRecording && handleSync(selectedRecording)}
-							>
-								<Text style={styles.buttonText}>Sync</Text>
-							</TouchableOpacity>
-						</View>
 					</View>
 				</View>
 			</Modal>
@@ -275,119 +273,187 @@ export default function RecordingsScreen() {
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-		backgroundColor: "#121212",
-		padding: 16,
+		backgroundColor: "#fff", // Zinc 950
+		paddingHorizontal: 20,
+		paddingTop: 60,
+	},
+	header: {
+		marginBottom: 24,
 	},
 	title: {
-		fontSize: 24,
+		fontSize: 28,
 		fontFamily: "Inter_700Bold",
-		color: "#fff",
-		marginTop: 60,
-		marginBottom: 20,
+		color: "#000",
+		marginBottom: 4,
+	},
+	subtitle: {
+		fontSize: 14,
+		fontFamily: "Inter_400Regular",
+		color: "#a1a1aa", // Zinc 400
 	},
 	list: {
-		paddingBottom: 20,
+		paddingBottom: 40,
 	},
-	recordingItem: {
-		backgroundColor: "#1a1a1a",
-		borderRadius: 8,
+	card: {
+		backgroundColor: "#f9f9f9", // Zinc 900
+		borderRadius: 16,
 		padding: 16,
+		marginBottom: 16,
+		borderWidth: 1,
+		borderColor: "#27272a", // Zinc 800
+		shadowColor: "#000",
+		shadowOffset: { width: 0, height: 4 },
+		shadowOpacity: 0.3,
+		shadowRadius: 4,
+		elevation: 4,
+	},
+	cardHeader: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		alignItems: "flex-start",
 		marginBottom: 12,
+	},
+	headerLeft: {
+		flex: 1,
+	},
+	pestName: {
+		fontSize: 18,
+		fontFamily: "Inter_600SemiBold",
+		color: "#000",
+		marginBottom: 4,
+	},
+	dateContainer: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 6,
+	},
+	dateText: {
+		fontSize: 12,
+		fontFamily: "Inter_400Regular",
+		color: "#71717a", // Zinc 500
+	},
+	cardBody: {
+		marginBottom: 16,
+	},
+	locationContainer: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 6,
+		marginBottom: 8,
+	},
+	locationText: {
+		fontSize: 14,
+		fontFamily: "Inter_500Medium",
+		color: "#000", // Zinc 300
+	},
+	description: {
+		fontSize: 14,
+		fontFamily: "Inter_400Regular",
+		color: "#000000", // Zinc 400
+		fontStyle: "italic",
+		lineHeight: 20,
+	},
+	cardFooter: {
 		flexDirection: "row",
 		justifyContent: "space-between",
 		alignItems: "center",
+		paddingTop: 12,
+		borderTopWidth: 1,
+		borderTopColor: "#000000", // Zinc 800
 	},
-	recordingInfo: {
-		flex: 1,
+	playButton: {
+		width: 44,
+		height: 44,
+		borderRadius: 22,
+		backgroundColor: "#16a34a", // Green 600
+		justifyContent: "center",
+		alignItems: "center",
+		shadowColor: "#16a34a",
+		shadowOffset: { width: 0, height: 2 },
+		shadowOpacity: 0.3,
+		shadowRadius: 4,
+		elevation: 2,
 	},
-	timestamp: {
-		color: "#fff",
-		fontSize: 16,
-		fontFamily: "Inter_600SemiBold",
-		marginBottom: 4,
-	},
-	location: {
-		color: "#888",
-		fontSize: 14,
-		fontFamily: "Inter_400Regular",
-	},
-	collection: {
-		color: "#666",
-		fontSize: 12,
-		fontFamily: "Inter_400Regular",
-		marginTop: 4,
-	},
-	transcription: {
-		color: "#2ecc71",
-		fontSize: 14,
-		fontFamily: "Inter_400Regular",
-		fontStyle: "italic",
-		marginTop: 8,
-	},
-	actions: {
+	actionsRight: {
 		flexDirection: "row",
 		gap: 8,
 	},
-	actionButton: {
+	iconButton: {
 		width: 40,
 		height: 40,
 		borderRadius: 20,
 		justifyContent: "center",
 		alignItems: "center",
+		backgroundColor: "#27272a", // Zinc 800
 	},
-	modalContainer: {
+	deleteButton: {
+		backgroundColor: "rgba(239, 68, 68, 0.1)", // Red 500 with opacity
+	},
+
+	// Modal Styles
+	modalOverlay: {
 		flex: 1,
-		backgroundColor: "rgba(0, 0, 0, 0.5)",
+		backgroundColor: "rgba(0, 0, 0, 0.7)",
 		justifyContent: "center",
-		padding: 16,
+		padding: 20,
 	},
 	modalContent: {
-		backgroundColor: "#1a1a1a",
-		borderRadius: 12,
-		padding: 20,
+		backgroundColor: "#18181b", // Zinc 900
+		borderRadius: 20,
+		padding: 24,
+		borderWidth: 1,
+		borderColor: "#27272a",
 	},
 	modalTitle: {
 		fontSize: 20,
 		fontFamily: "Inter_700Bold",
-		color: "#fff",
-		marginBottom: 20,
+		color: "#000000",
+		marginBottom: 24,
+		textAlign: "center",
 	},
-	inputContainer: {
+	inputGroup: {
 		marginBottom: 16,
 	},
 	label: {
-		color: "#fff",
-		fontSize: 16,
-		fontFamily: "Inter_600SemiBold",
+		fontSize: 18,
+		fontFamily: "Inter_500Medium",
+		color: "#000000",
 		marginBottom: 8,
 	},
 	input: {
-		backgroundColor: "#2a2a2a",
-		borderRadius: 8,
-		padding: 12,
+		backgroundColor: "#27272a", // Zinc 800
+		borderRadius: 12,
+		padding: 16,
 		color: "#fff",
 		fontFamily: "Inter_400Regular",
+		fontSize: 16,
 	},
 	modalActions: {
 		flexDirection: "row",
-		justifyContent: "flex-end",
 		gap: 12,
-		marginTop: 20,
+		marginTop: 8,
 	},
-	modalButton: {
-		paddingVertical: 10,
-		paddingHorizontal: 20,
-		borderRadius: 8,
+	button: {
+		flex: 1,
+		paddingVertical: 16,
+		borderRadius: 12,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 	cancelButton: {
-		backgroundColor: "#444",
+		backgroundColor: "#27272a",
 	},
 	syncButton: {
-		backgroundColor: "#2ecc71",
+		backgroundColor: "#16a34a",
 	},
-	buttonText: {
+	cancelButtonText: {
 		color: "#fff",
-		fontSize: 16,
 		fontFamily: "Inter_600SemiBold",
+		fontSize: 18,
+	},
+	syncButtonText: {
+		color: "#fff",
+		fontFamily: "Inter_600SemiBold",
+		fontSize: 18,
 	},
 })
