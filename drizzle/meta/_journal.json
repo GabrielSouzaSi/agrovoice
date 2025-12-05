@@ -8,6 +8,20 @@
       "when": 1757526305808,
       "tag": "0000_productive_spirit",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1764010931307,
+      "tag": "0001_cute_doctor_octopus",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1764014519988,
+      "tag": "0002_slimy_chimera",
+      "breakpoints": true
     }
   ]
 }

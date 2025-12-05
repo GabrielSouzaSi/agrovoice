@@ -1,9 +1,12 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { View, Text, TouchableOpacity, Alert } from "react-native"
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, withSequence } from 'react-native-reanimated';
+import { View, Text, TouchableOpacity, Alert, Button, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform } from "react-native"
 import { useFocusEffect } from "expo-router"
 import Vosk from "react-native-vosk"
+
 import * as Speech from "expo-speech"
 import { Mic, Square, Trash } from "lucide-react-native"
+import BottomSheet from '@gorhom/bottom-sheet';
 import {
 	useAudioRecorder,
 	useAudioPlayer,
@@ -17,6 +20,11 @@ import { persistFromCache } from "@/lib/fs"
 import { colors } from "@/styles/colors"
 import { buildRecordingName } from "@/lib/fileName"
 import { insertRecorder } from "@/database/recorder"
+import { insertPraga } from "@/database/praga"
+import React from "react"
+import { ALLOWED_OBJECTIVES, ALLOWED_PROPERTIES, ALLOWED_FIELDS } from "@/data/allowedValues"
+import { findBestMatch } from "@/lib/validation"
+
 
 function normalize(text: string) {
 	return String(text || "")
@@ -43,24 +51,52 @@ function extractText(res: any) {
 
 // Grammar por tokens (modo comandos)
 const COMMAND_GRAMMAR = [
-	"abrir",
-	"mapa",
-	"mostrar",
-	"perfil",
-	"saldo",
-	"meu",
-	"voltar",
-	"retornar",
-	"gravar",
-	"voz",
-	"o",
-	"[unk]",
+	"coleta",
+	"anomalia",
+	"propriedade",
+	"objetivo",
+	//"corrigir",
+	"repetir",
+	"finalizar",
+	"dia",
 ]
 
+
+
+const styles = StyleSheet.create({
+	contentContainer: {
+		flex: 1,
+		alignItems: 'center',
+		padding: 20,
+		backgroundColor: '#ffffff',
+	},
+	title: {
+		fontSize: 24,
+		fontFamily: "Inter_700Bold",
+		color: "#000000",
+		marginTop: 60,
+		marginBottom: 20,
+	},
+	container: {
+		flex: 1,
+		backgroundColor: "#ffffff",
+		padding: 16,
+	},
+});
+
 export default function RecordScreen() {
-	// fonte dinâmica para o player (será definida após a gravação)
+	const [isDayStarted, setIsDayStarted] = useState(false);
+	const [showForm, setShowForm] = useState(false);
+	const [showColetaUI, setShowColetaUI] = useState(false);
+	const [startDayStep, setStartDayStep] = useState<"idle" | "objectives" | "property" | "field" | "confirm">("idle");
+
+	// Form State
+	const [objectives, setObjectives] = useState("");
+	const [property, setProperty] = useState("");
+	const [field, setField] = useState("");
+
+	// --- Voice Assistant State ---
 	const [source, setSource] = useState<{ uri: string } | null>(null)
-	// player vinculado à fonte acima
 	const player = useAudioPlayer(source)
 	const vosk = useRef(new Vosk()).current
 
@@ -68,27 +104,44 @@ export default function RecordScreen() {
 	const [recognizing, setRecognizing] = useState(false)
 	const [partial, setPartial] = useState("")
 	const [result, setResult] = useState("")
-	const [results, setResults] = useState<string[]>([]) // histórico
+	const [results, setResults] = useState<string[]>([])
 	const [lastCommand, setLastCommand] = useState("(nenhum)")
-	const [mode, setMode] = useState<"commands" | "dictation">("commands") // <- novo
+	const [mode, setMode] = useState<"commands" | "dictation">("commands")
+
+	// Animation
+	const pulseAnim = useSharedValue(1);
+	const animatedStyle = useAnimatedStyle(() => ({
+		transform: [{ scale: pulseAnim.value }],
+	}));
+
+	useEffect(() => {
+		if (recognizing) {
+			pulseAnim.value = withRepeat(
+				withSequence(
+					withTiming(1.2, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+					withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) })
+				),
+				-1, true
+			);
+		} else {
+			pulseAnim.value = withTiming(1);
+		}
+	}, [recognizing]);
 
 	const startingRef = useRef(false)
 	const commandFiredRef = useRef(false)
 	const partialRef = useRef("")
-
 	const recognizingRef = useRef(false)
-
-	// ref para acumular tudo
 	const transcriptRef = useRef("")
+	const isColetaFlow = useRef(false)
+	const isStartDayFlow = useRef(false)
 
-	// estado de permissão de gravação (mic)
+	// Permissions
 	const [perm, setPerm] = useState<"undetermined" | "denied" | "granted">("undetermined")
 	useEffect(() => {
-		;(async () => {
-			// verifica a permissão atual
+		(async () => {
 			const res = await getRecordingPermissionsAsync()
 			setPerm(res.status)
-			// se não concedida e puder perguntar de novo, solicita ao usuário
 			if (res.status !== "granted" && res.canAskAgain) {
 				const req = await requestRecordingPermissionsAsync()
 				setPerm(req.status)
@@ -102,140 +155,92 @@ export default function RecordScreen() {
 		sampleRate: 44100,
 		numberOfChannels: 1,
 		bitRate: 64000,
-		android: {
-			// enums/strings aceitos pelo expo-audio para Android
-			outputFormat: "mpeg4",
-			audioEncoder: "aac",
-		},
-		ios: {
-			// enums para iOS (qualidade máxima e parâmetros PCM)
-			outputFormat: IOSOutputFormat.MPEG4AAC,
-			audioQuality: AudioQuality.MAX,
-			linearPCMBitDepth: 16,
-			linearPCMIsBigEndian: false,
-			linearPCMIsFloat: false,
-		},
-		web: {
-			// fallback para web (quando aplicável)
-			mimeType: "audio/webm",
-			bitsPerSecond: 128000,
-		},
+		android: { outputFormat: "mpeg4", audioEncoder: "aac" },
+		ios: { outputFormat: IOSOutputFormat.MPEG4AAC, audioQuality: AudioQuality.MAX, linearPCMBitDepth: 16, linearPCMIsBigEndian: false, linearPCMIsFloat: false },
+		web: { mimeType: "audio/webm", bitsPerSecond: 128000 },
 	})
 
-	// Start: "commands" (grammar) ou "dictation" (sem grammar)
-	const recognizingStart = useCallback(
-		async (startMode: "commands" | "dictation" = "commands") => {
-			console.log("recognizingStart =>", ready, recognizingRef.current, startingRef.current)
+	// --- Logic ---
+	const recognizingStart = useCallback(async (startMode: "commands" | "dictation" = "commands") => {
+		if (recognizingRef.current || startingRef.current) return
+		startingRef.current = true
 
-			if (recognizingRef.current || startingRef.current) return
-			//if (!ready) return // só bloqueia se ainda não carregou pela 1ª vez
-			startingRef.current = true
-			console.log(
-				"Modo de gravação:",
-				startMode === "commands" ? "com grammar" : "sem grammar",
-			)
-
-			try {
-				// NOVO: grava APENAS no modo ditado "dictation"
-				if (startMode === "dictation") {
-					transcriptRef.current = "" // 🔹 zera transcrição acumulada
-					setResults([]) // (opcional) limpa histórico mostrado na tela
-					try {
-						await recorder.prepareToRecordAsync()
-						await recorder.record()
-						console.log("Gravação iniciada 🎤")
-					} catch (e) {
-						console.warn("Falha ao iniciar gravação (dictation):", e)
-					}
+		try {
+			if (startMode === "dictation") {
+				transcriptRef.current = ""
+				setResults([])
+				try {
+					await recorder.prepareToRecordAsync()
+					await recorder.record()
+				} catch (e) {
+					console.warn("Falha ao iniciar gravação:", e)
 				}
-				commandFiredRef.current = false
-				partialRef.current = ""
-				setPartial("")
-				setResult("")
-				setMode(startMode)
-				const opts = startMode === "commands" ? { grammar: COMMAND_GRAMMAR } : {}
-				const started = await vosk.start(opts as any)
-				if (started === undefined) {
-					Alert.alert("Voz", "Permissão de microfone negada")
-					return
-				}
-				recognizingRef.current = true // ✅ atualiza ref imediatamente
-				setRecognizing(true)
-				console.log("Reconhecimento iniciado 🎤", startMode)
-			} catch (e) {
-				console.error("start:", e)
-			} finally {
-				startingRef.current = false
 			}
-		},
-		[ready, vosk], // ⬅️ não dependa de `recognizing` aqui
-	)
+			commandFiredRef.current = false
+			partialRef.current = ""
+			setPartial("")
+			setResult("")
+			setMode(startMode)
+
+			const opts = startMode === "commands" ? { grammar: COMMAND_GRAMMAR } : undefined
+			const started = await vosk.start(opts)
+
+			if (started === undefined) {
+				Alert.alert("Voz", "Permissão de microfone negada")
+				return
+			}
+			recognizingRef.current = true
+			setRecognizing(true)
+		} catch (e) {
+			console.error("start:", e)
+		} finally {
+			startingRef.current = false
+		}
+	}, [ready, vosk])
 
 	const recognizingStop = useCallback(async () => {
-		if (!recognizingRef.current) {
-			return // já está parado, não precisa parar de novo
-		}
+		if (!recognizingRef.current) return
 		recognizingRef.current = false
 		setRecognizing(false)
-		// console.log(mode)
 		let { isRecording } = recorder.getStatus()
 
 		try {
-			// 2) para o Vosk
 			await vosk.stop()
-			console.log("Reconhecimento parado ⏹️")
-
 			if (isRecording) {
 				await recorder.stop()
-				console.log("recognizingStop:" + isRecording)
-
-				// pega todo o texto acumulado
-				const transcription = transcriptRef.current
-
 				let filename = buildRecordingName(recorder.uri, "recorder")
-				let saved = await persistFromCache(recorder.uri, {
-					targetSubdir: "recordings",
-					overwrite: false,
-					filename,
-				})
-
+				let saved = await persistFromCache(recorder.uri, { targetSubdir: "recordings", overwrite: false, filename })
 				let location = await statusGPS()
 
-				console.log(
-					"Gravação salva!\n" +
-						"Name => " +
-						saved.name +
-						"\nURI => " +
-						saved.uri +
-						"\nSize => " +
-						saved.size,
-				)
-				let insert = await insertRecorder({
-					name: saved.name,
-					file: saved.uri,
-					transcription: transcription,
-					location: location
-						? `${location.coords.latitude},${location.coords.longitude}`
-						: "Indisponível",
-					datetime: new Date().toISOString(),
-				} as any)
-				console.log(insert)
-				insert
-					? Speech.speak("Audio gravado com sucesso")
-					: Speech.speak("Erro ao gravar audio")
-				// reseta para próxima vez
-				// setSource(saved)
+				if (isColetaFlow.current) {
+					// Logic for Coleta Command
+					const pestName = transcriptRef.current.trim() || "Não identificado";
+					await insertPraga({
+						name: saved.name,
+						file: saved.uri,
+						description: `Objetivo: ${objectives}`,
+						fazenda: property || "Indefinido",
+						praga: pestName,
+						location: location ? `${location.coords.latitude},${location.coords.longitude}` : "Indisponível",
+						datetime: new Date().toISOString(),
+					} as any)
+					Speech.speak(`Coleta salva: ${pestName}`)
+					isColetaFlow.current = false; // Reset flow
+					setShowColetaUI(false);
+				} else if (isStartDayFlow.current) {
+					// Logic for Start Day Flow is handled in onResult/onFinal mostly, 
+					// but if we stop recording, we might need to trigger next step if we have a result.
+					// For now, let's rely on the silence timeout or manual stop to trigger processing in onFinal/onTimeout
+				}
 				return
 			}
 		} catch (e) {
 			console.error("stop:", e)
 		} finally {
-			// 3) atualiza estados/refs
-			recognizingRef.current = false // ✅ ref zera já
+			recognizingRef.current = false
 			setRecognizing(false)
 			commandFiredRef.current = false
 			partialRef.current = ""
-			// reseta para próxima vez
 			transcriptRef.current = ""
 			setResult("")
 			if (isRecording) {
@@ -244,127 +249,270 @@ export default function RecordScreen() {
 				}, 5000)
 			}
 		}
-	}, [vosk])
+	}, [vosk, objectives, property, field])
 
-	// AÇÕES dentro do componente
-	const abrirMapa = useCallback(() => {
+	const speakCommandVoice = useCallback(async (message = "Estou ouvindo") => {
+		setLastSpokenMessage(message)
 		Speech.stop()
-		Speech.speak("Abrindo mapa", {
+		Speech.speak(message, {
 			language: "pt-BR",
 			onDone: () => {
-				// reinicia em modo ditado (sem grammar, timeout maior)
-				;(async () => {
-					setTimeout(() => {
-						recognizingStart("commands")
-					}, 5000)
+				; (async () => {
+					await recognizingStart("commands")
 				})()
 			},
 		})
-	}, []) // sem deps de estado
-	const mostrarPerfil = useCallback(() => {
+	}, [recognizingStart])
+
+	const speakUnknownCommand = useCallback(() => {
 		Speech.stop()
-		Speech.speak("Mostrando perfil", { language: "pt-BR" })
-		console.log(">> mostrarPerfil()")
-	}, [])
-	const mostrarSaldo = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Mostrando saldo", { language: "pt-BR" })
-		console.log(">> mostrarSaldo()")
-	}, [])
-	const voltar = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Voltando", { language: "pt-BR" })
-		console.log(">> voltar()")
-	}, [])
-	// “gravar voz” => trocar para modo ditado na MESMA instância
-	const gravarVoz = useCallback(async () => {
-		Speech.stop()
-		Speech.speak("Gravar voz", {
+		Speech.speak("Desculpe, não entendi. Pode repetir?", {
 			language: "pt-BR",
 			onDone: () => {
-				// reinicia em modo ditado (sem grammar, timeout maior)
-				;(async () => {
+				setTimeout(() => {
+					recognizingStart("commands")
+				}, 500)
+			}
+		})
+	}, [recognizingStart])
+
+	// Actions
+	const abrirMapa = useCallback(() => {
+		Speech.stop()
+		Speech.speak("Abrindo mapa agora", {
+			language: "pt-BR",
+			onDone: () => {
+				setTimeout(() => recognizingStart("commands"), 5000)
+			}
+		})
+	}, [])
+	const mostrarPerfil = useCallback(() => { Speech.stop(); Speech.speak("Mostrando perfil", { language: "pt-BR" }) }, [])
+	const mostrarSaldo = useCallback(() => { Speech.stop(); Speech.speak("Mostrando saldo", { language: "pt-BR" }) }, [])
+	const voltar = useCallback(() => { Speech.stop(); Speech.speak("Voltando", { language: "pt-BR" }) }, [])
+
+	const gravarVoz = useCallback(async () => {
+		Speech.stop()
+		Speech.speak("Pode falar alguma coisa", {
+			language: "pt-BR",
+			onDone: () => {
+				; (async () => {
 					await recognizingStop()
 					await recognizingStart("dictation")
 				})()
 			},
 		})
-	}, [recognizingStop, recognizingStart]) // sem deps de estado
+	}, [recognizingStop, recognizingStart])
 
-	// Padrões de comando
-	const COMMANDS = useMemo(
-		() => [
-			{ label: "abrir mapa", re: /(^|\s)abrir\s+(o\s+)?mapa(\s|$)/, run: abrirMapa },
-			{
-				label: "mostrar perfil",
-				re: /(^|\s)(mostrar\s+(o\s+)?)?perfil(\s|$)/,
-				run: mostrarPerfil,
-			},
-			{ label: "saldo", re: /(^|\s)(meu\s+)?saldo(\s|$)/, run: mostrarSaldo },
-			{ label: "voltar", re: /(^|\s)(voltar|retornar)(\s|$)/, run: voltar },
-			{ label: "gravar voz", re: /(^|\s)gravar\s+voz(\s|$)/, run: gravarVoz },
-		],
-		[abrirMapa, mostrarPerfil, mostrarSaldo, voltar, gravarVoz],
-	)
-
-	// Carrega modelo 1x
-	useEffect(() => {
-		vosk.loadModel("vosk-model-pt")
-			.then(() => setReady(true))
-			.catch((e) => console.error("loadModel:", e))
-		return () => {
-			vosk.unload()
-		}
-	}, [vosk])
-
-	// Dispara 1 comando por ciclo
-	const tryRunCommand = useCallback(
-		async (raw: string) => {
-			if (commandFiredRef.current) return
-			const t = normalize(raw)
-			if (!t) return
-			//console.log("[tryRunCommand] texto:", t)
-			for (const c of COMMANDS) {
-				if (c.re.test(t)) {
-					commandFiredRef.current = true
-					setLastCommand(c.label)
-					//console.log("[tryRunCommand] comando reconhecido:", c.label)
-					try {
-						await Promise.resolve(c.run())
-					} catch (e) {
-						console.error("Falha ao executar ação:", e)
-					} finally {
-						// se comando NÃO foi “gravar voz”, pare após executar
-						if (c.label !== "gravar voz") recognizingStop()
-					}
-					break
-				}
-			}
-		},
-		[COMMANDS],
-	)
-
-	const speakCommandVoice = useCallback(async () => {
+	const gravarColeta = useCallback(async () => {
 		Speech.stop()
-		Speech.speak("Diga um comando", {
+		setShowColetaUI(true);
+		Speech.speak("Qual anomalia você encontrou?", {
 			language: "pt-BR",
 			onDone: () => {
-				;(async () => {
-					await recognizingStart("commands")
+				; (async () => {
+					isColetaFlow.current = true;
+					await recognizingStop()
+					await recognizingStart("dictation")
 				})()
 			},
 		})
-	}, [])
+	}, [recognizingStop, recognizingStart])
 
-	// Listeners
+	const processStartDayStep = useCallback(async (text: string) => {
+		const cleanText = text.trim();
+		if (!cleanText) return;
+
+		if (startDayStep === "objectives") {
+			const match = findBestMatch(cleanText, ALLOWED_OBJECTIVES);
+			if (match) {
+				setObjectives(match);
+				setStartDayStep("property");
+				Speech.speak(`Entendido: ${match}. Qual é a propriedade? Tente: ${ALLOWED_PROPERTIES.slice(0, 2).join(", ")}.`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			} else {
+				Speech.speak(`Não entendi. As opções são: ${ALLOWED_OBJECTIVES.slice(0, 3).join(", ")} e outros. Tente novamente.`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			}
+		} else if (startDayStep === "property") {
+			const match = findBestMatch(cleanText, ALLOWED_PROPERTIES);
+			if (match) {
+				setProperty(match);
+				setStartDayStep("field");
+				Speech.speak(`Certo: ${match}. Qual é o talhão? Tente 01 até 10`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			} else {
+				Speech.speak(`Propriedade não encontrada. Tente: ${ALLOWED_PROPERTIES.slice(0, 2).join(", ")}.`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			}
+		} else if (startDayStep === "field") {
+			// For fields, we might want to be more lenient or strict. Let's be strict for now as requested.
+			// But numeric voice input can be tricky ("um" vs "1"). 
+			// Our findBestMatch handles string inclusion, so "talhão 05" might match "05".
+			const match = findBestMatch(cleanText, ALLOWED_FIELDS);
+			if (match) {
+				setField(match);
+				setStartDayStep("confirm");
+				Speech.speak(`Confirmando. Objetivo: ${objectives}, Propriedade: ${property}, Talhão: ${match}. Posso iniciar?`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation"); // Listen for confirmation
+					}
+				});
+			} else {
+				Speech.speak(`Talhão inválido. Exemplos: 01, 05, 10.`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			}
+		} else if (startDayStep === "confirm") {
+			const lower = cleanText.toLowerCase();
+			if (lower.includes("sim") || lower.includes("confirmar") || lower.includes("pode") || lower.includes("iniciar")) {
+				handleConfirmStartDay();
+			} else {
+				Speech.speak("Não entendi. Diga 'Sim' para confirmar ou 'Cancelar' para parar.", {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+			}
+		}
+	}, [startDayStep, objectives, property, recognizingStart]);
+
+	const [lastSpokenMessage, setLastSpokenMessage] = useState("")
+
+
+
+	// ... (other functions)
+
+	const corrigir = useCallback(async () => {
+		Speech.stop()
+		// If in Coleta flow, restart it
+		if (isColetaFlow.current) {
+			Speech.speak("Correção. Qual anomalia você encontrou?", {
+				language: "pt-BR",
+				onDone: () => {
+					; (async () => {
+						transcriptRef.current = ""
+						setResults([])
+						await recognizingStop()
+						await recognizingStart("dictation")
+					})()
+				},
+			})
+		} else {
+			// Generic correction
+			Speech.speak("Correção. O que deseja fazer?", {
+				language: "pt-BR",
+				onDone: () => {
+					; (async () => {
+						await recognizingStart("commands")
+					})()
+				},
+			})
+		}
+	}, [recognizingStop, recognizingStart])
+
+	const repetir = useCallback(async () => {
+		Speech.stop()
+		const msg = lastSpokenMessage || "Não tenho nada para repetir."
+		Speech.speak(msg, {
+			language: "pt-BR",
+			onDone: () => {
+				; (async () => {
+					if (isColetaFlow.current) {
+						await recognizingStart("dictation")
+					} else {
+						await recognizingStart("commands")
+					}
+				})()
+			},
+		})
+	}, [lastSpokenMessage, recognizingStart])
+
+	const handleEndDay = useCallback(() => {
+		setIsDayStarted(false);
+		recognizingStop();
+		Speech.stop();
+		// Reset form? Maybe keep for next day or clear. Let's clear.
+		setObjectives("");
+		setProperty("");
+		setField("");
+		setStartDayStep("idle");
+		isStartDayFlow.current = false;
+		setShowColetaUI(false);
+	}, [recognizingStop]);
+
+	const COMMANDS = useMemo(() => [
+		{ label: "abrir mapa", re: /(^|\s)abrir\s+(o\s+)?mapa(\s|$)/, run: abrirMapa },
+		{ label: "mostrar perfil", re: /(^|\s)(mostrar\s+(o\s+)?)?perfil(\s|$)/, run: mostrarPerfil },
+		{ label: "saldo", re: /(^|\s)(meu\s+)?saldo(\s|$)/, run: mostrarSaldo },
+		{ label: "voltar", re: /(^|\s)(voltar|retornar)(\s|$)/, run: voltar },
+		{ label: "gravar voz", re: /(^|\s)gravar\s+voz(\s|$)/, run: gravarVoz },
+		{ label: "coleta", re: /(^|\s)coleta(\s|$)/, run: gravarColeta },
+		{ label: "corrigir", re: /(^|\s)corrigir(\s|$)/, run: corrigir },
+		{ label: "repetir", re: /(^|\s)repetir(\s|$)/, run: repetir },
+		{ label: "finalizar dia", re: /(^|\s)finalizar\s+dia(\s|$)/, run: () => { Speech.stop(); Speech.speak("Finalizando o dia", { language: "pt-BR", onDone: handleEndDay }); } },
+	], [abrirMapa, mostrarPerfil, mostrarSaldo, voltar, gravarVoz, gravarColeta, corrigir, repetir, handleEndDay])
+
 	useEffect(() => {
-		// 🔹 helper local para detectar "stop" no modo ditado
+		vosk.loadModel("vosk-model-pt").then(() => setReady(true)).catch(e => console.error("loadModel:", e))
+		return () => { vosk.unload() }
+	}, [vosk])
+
+	const tryRunCommand = useCallback(async (raw: string) => {
+		if (commandFiredRef.current) return
+		const t = normalize(raw)
+		if (!t) return
+		for (const c of COMMANDS) {
+			if (c.re.test(t)) {
+				commandFiredRef.current = true
+				setLastCommand(c.label)
+				try { await Promise.resolve(c.run()) }
+				catch (e) { console.error("Falha ação:", e) }
+				finally { if (c.label !== "gravar voz" && c.label !== "gravar praga" && c.label !== "coleta") recognizingStop() }
+				break
+			}
+		}
+	}, [COMMANDS])
+
+	useEffect(() => {
 		const handleHotwordStop = (text: string) => {
 			const n = normalize(text)
 			if (mode === "dictation" && /\bfinalizar\b/i.test(n)) {
-				// limpa UI de parcial e encerra
 				partialRef.current = ""
-				setPartial("")
 				recognizingStop()
 				return true
 			}
@@ -373,160 +521,326 @@ export default function RecordScreen() {
 		const onResult = vosk.onResult((res: string) => {
 			const t = extractText(res)
 			if (!t) return
-
 			if (mode === "dictation") {
-				transcriptRef.current = (transcriptRef.current + " " + t).trim() // 🔹 acumula
-				setResults((prev) => [...prev, t]) // (UI) histórico
-				// ⛔ HOTWORD
+				transcriptRef.current = (transcriptRef.current + " " + t).trim()
+				setResults(prev => [...prev, t])
 				if (handleHotwordStop(t)) return
+
+				// Auto-save for Coleta flow on first result
+				if (isColetaFlow.current && t.trim().length > 0) {
+					console.log("chegou aqui on result")
+					recognizingStop()
+				}
+
+				// Handle Start Day Flow
+				if (isStartDayFlow.current && t.trim().length > 0) {
+					// We wait for final result or timeout usually, but if we want faster interaction:
+					// For now let's wait for silence/timeout to ensure full sentence
+				}
 			}
 		})
-
 		const onPartial = vosk.onPartialResult((s: string) => {
 			const raw = extractText(s)
-
 			partialRef.current = raw
 			setPartial(raw)
-			// responder já em parcial (mais responsivo) SÓ no modo comandos
 			if (mode === "commands") tryRunCommand(raw)
 		})
 		const onFinal = vosk.onFinalResult((res: string) => {
 			const t = extractText(res)
 			partialRef.current = ""
 			setPartial("")
-
 			if (!t) return
-
 			if (mode === "dictation") {
-				transcriptRef.current = (transcriptRef.current + " " + t).trim() // 🔹 acumula
-				setResults((prev) => [...prev, t]) // (UI)
-				// ⛔ HOTWORD
+				transcriptRef.current = (transcriptRef.current + " " + t).trim()
+				setResults(prev => [...prev, t])
 				if (handleHotwordStop(t)) return
+
+				// Auto-save for Coleta flow: if we got a result, assume user finished speaking the name
+				if (isColetaFlow.current && t.trim().length > 0) {
+					console.log("chegou aqui on final")
+					recognizingStop()
+				}
+
+				if (isStartDayFlow.current && t.trim().length > 0) {
+					recognizingStop();
+					processStartDayStep(transcriptRef.current);
+				}
 			} else {
 				tryRunCommand(normalize(t))
 			}
 		})
 		const onError = vosk.onError((e: any) => console.error("Vosk error:", e))
 		const onTimeout = vosk.onTimeout(async () => {
-			console.log("[timeout] último parcial:", partialRef.current)
-			if (mode === "commands" && partialRef.current && !commandFiredRef.current) {
-				await tryRunCommand(partialRef.current)
+			// Auto-save for Coleta flow when user pauses
+			if (isColetaFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
+				recognizingStop()
+				return
 			}
-			console.log("[timeout] parando reconhecimento")
+
+			if (isStartDayFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
+				recognizingStop();
+				processStartDayStep(transcriptRef.current);
+				return;
+			}
+
+			if (mode === "commands") {
+				if (partialRef.current && !commandFiredRef.current) {
+					await tryRunCommand(partialRef.current)
+				} else if (!commandFiredRef.current) {
+					speakUnknownCommand()
+					return
+				}
+			}
 			recognizingStop()
 		})
-		return () => {
-			onResult.remove()
-			onPartial.remove()
-			onFinal.remove()
-			onError.remove()
-			onTimeout.remove()
-		}
-	}, [vosk, tryRunCommand, mode])
+		return () => { onResult.remove(); onPartial.remove(); onFinal.remove(); onError.remove(); onTimeout.remove() }
+	}, [vosk, tryRunCommand, mode, processStartDayStep])
 
-	// Para ao desfocar
-	useFocusEffect(
-		useCallback(() => {
-			return () => {
-				recognizingStop()
-			}
-		}, []),
-	)
+	useFocusEffect(useCallback(() => { return () => { recognizingStop() } }, []))
+	useEffect(() => { recognizingRef.current = recognizing }, [recognizing])
 
-	useEffect(() => {
-		recognizingRef.current = recognizing
-	}, [recognizing])
-
-	const clearText = () => {
-		setPartial("")
-		setResult("")
-		setLastCommand("(nenhum)")
-	}
-
-	useEffect(() => {
-		if (results.length > 0) console.log(results.join(" "))
-	}, [results])
-
-	// Solicitar permissão
 	async function getPermissionGPS() {
 		const { status } = await Location.requestForegroundPermissionsAsync()
-
-		if (status !== "granted") {
-			Alert.alert("Permissão negada", "Dê permissão da localização para continuar.", [
-				{ text: "OK", onPress: () => getPermissionGPS() },
-			])
-			return
-		} else {
-			await statusGPS()
-		}
+		if (status !== "granted") return
+		await statusGPS()
 	}
-	// Verificar se o GPS está ativado
 	async function statusGPS() {
 		const isGPSEnabled = await Location.hasServicesEnabledAsync()
+		if (!isGPSEnabled) return false
+		return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+	}
+	useEffect(() => { getPermissionGPS() }, [])
 
-		if (!isGPSEnabled) {
-			Alert.alert("GPS desativado", "Ative o GPS para capturar a localização.")
-			return false
-		} else {
-			// Capturar localização
-			const userLocation = await Location.getCurrentPositionAsync({
-				accuracy: Location.Accuracy.High,
-			})
-			// Armazena a localização no estado
-			return userLocation
+	// --- Start Day Logic ---
+	const handleStartDay = () => {
+		setShowForm(true);
+		setStartDayStep("objectives");
+		isStartDayFlow.current = true;
+		Speech.speak(`Qual é o objetivo do dia?  As opções são: ${ALLOWED_OBJECTIVES.slice(0, 3).join(", ")}`, {
+			language: "pt-BR",
+			onDone: () => {
+				transcriptRef.current = "";
+				setResults([]);
+				recognizingStart("dictation");
+			}
+		});
+	};
+
+	const handleConfirmStartDay = () => {
+		// If manually confirming, ensure we have data. 
+		// If voice confirming, we might have data in state already.
+		if (!objectives || !property || !field) {
+			Alert.alert("Atenção", "Preencha todos os campos para iniciar o dia.");
+			return;
 		}
+		setShowForm(false);
+		setIsDayStarted(true);
+		isStartDayFlow.current = false;
+		setStartDayStep("idle");
+
+		// Auto-start voice assistant
+		setTimeout(() => {
+			speakCommandVoice(`Dia iniciado na propriedade ${property}, talhão ${field}. O que deseja fazer?`);
+		}, 1000);
+	};
+
+	const handleCancelForm = () => {
+		setShowForm(false);
+		setObjectives("");
+		setProperty("");
+		setField("");
+		setStartDayStep("idle");
+		isStartDayFlow.current = false;
+		Speech.stop();
+		recognizingStop();
 	}
 
-	useEffect(() => {
-		getPermissionGPS()
-	}, [])
+
+
+	if (showColetaUI) {
+		return (
+			<View style={styles.container} className="justify-center">
+				<View className="flex-1 justify-center px-6">
+					<TouchableOpacity
+						onPress={() => { setShowColetaUI(false); isColetaFlow.current = false; recognizingStop(); }}
+						className="absolute top-10 right-4 z-20 bg-gray-100 p-2 rounded-full"
+					>
+						<Trash size={24} color="#ef4444" />
+					</TouchableOpacity>
+
+					<View className="mb-8">
+						<Text className="text-3xl text-green-600 font-bold mb-4">
+							Qual anomalia?
+						</Text>
+						<View>
+							<Text className="text-4xl font-bold text-black leading-tight">
+								{partial || "..."}
+							</Text>
+							{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
+						</View>
+					</View>
+				</View>
+			</View>
+		);
+	}
+
+	if (showForm) {
+		return (
+			<View style={styles.container} className="justify-center">
+				<View className="flex-1 justify-center px-6">
+					{/* Header / Cancel */}
+					<TouchableOpacity
+						onPress={handleCancelForm}
+						className="absolute top-10 right-4 z-20 bg-gray-100 p-2 rounded-full"
+					>
+						<Trash size={24} color="#ef4444" />
+					</TouchableOpacity>
+
+					{/* Step 1: Objectives */}
+					<View className={`mb-8 transition-all ${startDayStep === 'objectives' ? 'opacity-100' : 'opacity-40'}`}>
+						<Text className={`font-bold mb-5 ${startDayStep === 'objectives' ? 'text-3xl text-black' : 'text-xl text-gray-400'}`}>
+							1. Objetivo do Dia
+						</Text>
+						{startDayStep === 'objectives' && (
+							<View>
+								<Text className="text-4xl font-bold text-green-600 leading-tight">
+									{partial || objectives || "..."}
+								</Text>
+								{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
+							</View>
+						)}
+						{startDayStep !== 'objectives' && (
+							<Text className="text-2xl text-gray-800 font-medium">{objectives}</Text>
+						)}
+					</View>
+
+					{/* Step 2: Property */}
+					{(startDayStep === 'property' || startDayStep === 'field' || startDayStep === 'confirm') && (
+						<View className={`mb-8 transition-all ${startDayStep === 'property' ? 'opacity-100' : 'opacity-40'}`}>
+							<Text className={`font-bold mb-2 ${startDayStep === 'property' ? 'text-3xl text-black' : 'text-xl text-gray-400'}`}>
+								2. Propriedade
+							</Text>
+							{startDayStep === 'property' && (
+								<View>
+									<Text className="text-4xl font-bold text-green-600 leading-tight">
+										{partial || property || "..."}
+									</Text>
+									{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
+								</View>
+							)}
+							{startDayStep !== 'property' && (
+								<Text className="text-2xl text-gray-800 font-medium">{property}</Text>
+							)}
+						</View>
+					)}
+
+					{/* Step 3: Field */}
+					{(startDayStep === 'field' || startDayStep === 'confirm') && (
+						<View className={`mb-8 transition-all ${startDayStep === 'field' ? 'opacity-100' : 'opacity-40'}`}>
+							<Text className={`font-bold mb-2 ${startDayStep === 'field' ? 'text-3xl text-green-600' : 'text-xl text-gray-400'}`}>
+								3. Talhão
+							</Text>
+							{startDayStep === 'field' && (
+								<View>
+									<Text className="text-4xl font-bold text-green-600 leading-tight">
+										{partial || field || "..."}
+									</Text>
+									{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
+								</View>
+							)}
+							{startDayStep !== 'field' && (
+								<Text className="text-2xl text-gray-800 font-medium">{field}</Text>
+							)}
+						</View>
+					)}
+
+					{/* Confirmation */}
+					{startDayStep === 'confirm' && (
+						<View className="mt-8 items-center">
+							<Text className="text-2xl font-bold text-center mb-6">Posso iniciar?</Text>
+							<View className="flex-row gap-4 w-full">
+								<TouchableOpacity
+									className="flex-1 bg-green-600 py-6 rounded-2xl items-center shadow-lg"
+									onPress={handleConfirmStartDay}
+								>
+									<Text className="text-white text-xl font-bold">SIM</Text>
+								</TouchableOpacity>
+								<TouchableOpacity
+									className="flex-1 bg-red-100 py-6 rounded-2xl items-center"
+									onPress={handleCancelForm}
+								>
+									<Text className="text-red-500 text-xl font-bold">NÃO</Text>
+								</TouchableOpacity>
+							</View>
+							<Text className="text-gray-400 mt-4 text-center">Diga "Sim" ou "Confirmar"</Text>
+						</View>
+					)}
+				</View>
+			</View>
+		);
+	}
+
+	if (!isDayStarted) {
+		return (
+			<View style={styles.container} className="items-center justify-center">
+				<Text style={styles.title}>AgroVoice</Text>
+				<TouchableOpacity
+					className="bg-green-400 px-20 py-10 rounded-full shadow-lg elevation-lg"
+					onPress={handleStartDay}
+				>
+					<Text className="text-white text-x2 font-bold">INICIAR DIA</Text>
+				</TouchableOpacity>
+			</View>
+		);
+	}
 
 	return (
-		<View className="flex-1 justify-center items-center bg-gray-1000 gap-3 p-4">
-			{/* {source?.uri && <Button title="play" onPress={() => player.play()} />} */}
-			<View className="absolute top-24 p-4 rounded-lg bg-gray-900">
-				<Text className="text-white-500 text-lg font-semiBold">
-					{recognizing
-						? mode === "commands"
-							? "Escutando comando..."
-							: "Gravando voz..."
-						: "Pressione o botão e fale um comando"}
-				</Text>
+		<View style={styles.container}>
+			<View className="absolute top-10 right-4 z-10">
+				<TouchableOpacity onPress={handleEndDay} className="bg-red-500/20 px-8 py-4 rounded-full">
+					<Text className="text-red-400 text-base font-bold">FINALIZAR DIA</Text>
+				</TouchableOpacity>
 			</View>
 
-			<View className="absolute top-44 p-4 rounded-lg bg-gray-900 w-11/12">
-				{!!partial && (
-					<Text className="text-gray-500 text-sm font-semiBold italic">
-						Escutando: {partial}
+			<View>
+				<View className="p-4 rounded-lg mb-2">
+					<Text style={styles.title}>Agro</Text>
+					<Text className="text-black text-lg font-light">
+						{recognizing
+							? mode === "commands" ? "Escutando comando..." : "Gravando voz..."
+							: "Pressione o botão e fale um comando"}
 					</Text>
-				)}
-				<Text className="text-gray-500 text-sm font-semiBold italic mt-2">
-					Último comando: {lastCommand}
-				</Text>
+				</View>
+
+				<View className="p-4 rounded-lg w-full mb-2 items-center min-h-[100px] justify-center">
+					{!!partial && (
+						<Text className="text-black text-2xl font-bold text-center leading-8 shadow-sm">
+							"{partial}"
+						</Text>
+					)}
+					<Text className="text-black text-sm font-semiBold italic mt-4">
+						{lastCommand !== "(nenhum)" ? `Último: ${lastCommand}` : ""}
+					</Text>
+				</View>
 			</View>
 
-			<View className="items-center justify-center">
+			<View className="items-center justify-center top-20">
 				<TouchableOpacity
-					className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${recognizing ? "bg-red-500" : ""}`}
 					disabled={!ready || startingRef.current}
 					onPress={() => (recognizing ? recognizingStop() : speakCommandVoice())}
 				>
-					{recognizing ? (
-						<Square size={32} color="#fff" />
-					) : (
-						<Mic size={32} color="#fff" />
-					)}
+					<Animated.View
+						className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${recognizing ? "bg-red-500" : ""}`}
+						style={[animatedStyle]}
+					>
+						{recognizing ? (
+							<Square size={32} color="#fff" />
+						) : (
+							<Mic size={32} color="#fff" />
+						)}
+					</Animated.View>
 				</TouchableOpacity>
 			</View>
-
-			{recognizing && (
-				<TouchableOpacity
-					className="absolute bottom-10 p-4 rounded-lg bg-gray-900"
-					onPress={clearText}
-				>
-					<Trash size={24} color={colors.red[500]} />
-				</TouchableOpacity>
-			)}
 		</View>
 	)
 }

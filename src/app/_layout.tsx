@@ -16,6 +16,7 @@ import { useMigrations } from "drizzle-orm/expo-sqlite/migrator"
 import { useDrizzleStudio } from "expo-drizzle-studio-plugin"
 import { DATABASE_NAME, db, expoDb } from "@/database/connection"
 import migrations from "../../drizzle/migrations.js"
+import React from "react"
 
 // Prevent the splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync()
@@ -47,7 +48,8 @@ function RootLayoutNav() {
 
 	return (
 		<>
-			<Stack screenOptions={{ headerShown: false }}>
+			<Stack screenOptions={{ headerShown: false }} initialRouteName="login/login_page">
+				<Stack.Screen name="login/login_page" />
 				<Stack.Screen name="(tabs)" />
 			</Stack>
 			<StatusBar style="light" />
