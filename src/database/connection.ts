@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/expo-sqlite";
 import * as SQLite from "expo-sqlite";
 import * as recorderSchema from "@/database/schemas/recorderSchema"
 import * as pragaSchema from "@/database/schemas/pragaSchema"
+import * as configSchema from "@/database/schemas/configSchema"
 
 // Abrir conexão com o banco de dados
 export const DATABASE_NAME = "databese.db";
@@ -12,3 +13,4 @@ export const db = drizzle(expoDb);
 
 export const tableRecoder = drizzle(expoDb, { schema: recorderSchema, });
 export const tablePraga = drizzle(expoDb, { schema: pragaSchema, });
+export const tableConfig = drizzle(expoDb, { schema: configSchema, });

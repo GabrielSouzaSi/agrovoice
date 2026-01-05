@@ -5,4 +5,5 @@ export type RecorderDTO = {
 	file: string
 	location: string
 	datetime: string
+	synced?: number
 }

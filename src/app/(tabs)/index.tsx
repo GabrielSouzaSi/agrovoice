@@ -22,8 +22,9 @@ import { buildRecordingName } from "@/lib/fileName"
 import { insertRecorder } from "@/database/recorder"
 import { insertPraga } from "@/database/praga"
 import React from "react"
-import { ALLOWED_OBJECTIVES, ALLOWED_PROPERTIES, ALLOWED_FIELDS } from "@/data/allowedValues"
+import { useAllowedValues } from "@/data/allowedValues"
 import { findBestMatch } from "@/lib/validation"
+import * as ImagePicker from 'expo-image-picker';
 
 
 function normalize(text: string) {
@@ -89,6 +90,7 @@ export default function RecordScreen() {
 	const [showForm, setShowForm] = useState(false);
 	const [showColetaUI, setShowColetaUI] = useState(false);
 	const [startDayStep, setStartDayStep] = useState<"idle" | "objectives" | "property" | "field" | "confirm">("idle");
+	const { objectives: ALLOWED_OBJECTIVES, properties: ALLOWED_PROPERTIES, fields: ALLOWED_FIELDS } = useAllowedValues();
 
 	// Form State
 	const [objectives, setObjectives] = useState("");
@@ -107,6 +109,12 @@ export default function RecordScreen() {
 	const [results, setResults] = useState<string[]>([])
 	const [lastCommand, setLastCommand] = useState("(nenhum)")
 	const [mode, setMode] = useState<"commands" | "dictation">("commands")
+
+	// Photo Flow State
+	const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
+	const [tempPragaName, setTempPragaName] = useState("");
+	const [tempPragaFile, setTempPragaFile] = useState<any>(null);
+	const isPhotoDecisionFlow = useRef(false);
 
 	// Animation
 	const pulseAnim = useSharedValue(1);
@@ -179,7 +187,6 @@ export default function RecordScreen() {
 			commandFiredRef.current = false
 			partialRef.current = ""
 			setPartial("")
-			setResult("")
 			setMode(startMode)
 
 			const opts = startMode === "commands" ? { grammar: COMMAND_GRAMMAR } : undefined
@@ -215,18 +222,24 @@ export default function RecordScreen() {
 				if (isColetaFlow.current) {
 					// Logic for Coleta Command
 					const pestName = transcriptRef.current.trim() || "Não identificado";
-					await insertPraga({
-						name: saved.name,
-						file: saved.uri,
-						description: `Objetivo: ${objectives}`,
-						fazenda: property || "Indefinido",
-						praga: pestName,
-						location: location ? `${location.coords.latitude},${location.coords.longitude}` : "Indisponível",
-						datetime: new Date().toISOString(),
-					} as any)
-					Speech.speak(`Coleta salva: ${pestName}`)
-					isColetaFlow.current = false; // Reset flow
-					setShowColetaUI(false);
+
+					// Store temp data and ask for photo
+					setTempPragaName(pestName);
+					setTempPragaFile(saved);
+					isColetaFlow.current = false;
+					isPhotoDecisionFlow.current = true;
+					setShowColetaUI(false); // Hide the "Qual anomalia?" UI
+					setShowPhotoPrompt(true); // Show the "Deseja foto?" UI
+
+					Speech.speak(`Entendi ${pestName}. Deseja tirar uma foto?`, {
+						language: "pt-BR",
+						onDone: () => {
+							transcriptRef.current = "";
+							setResults([]);
+							recognizingStart("dictation");
+						}
+					});
+					// We don't save yet. We wait for the photo decision.
 				} else if (isStartDayFlow.current) {
 					// Logic for Start Day Flow is handled in onResult/onFinal mostly, 
 					// but if we stop recording, we might need to trigger next step if we have a result.
@@ -245,7 +258,9 @@ export default function RecordScreen() {
 			setResult("")
 			if (isRecording) {
 				setTimeout(() => {
-					speakCommandVoice()
+					if (!isStartDayFlow.current && !isColetaFlow.current && !isPhotoDecisionFlow.current) {
+						speakCommandVoice()
+					}
 				}, 5000)
 			}
 		}
@@ -413,6 +428,66 @@ export default function RecordScreen() {
 
 	const [lastSpokenMessage, setLastSpokenMessage] = useState("")
 
+	const savePraga = async (photoUri: string | null) => {
+		let location = await statusGPS()
+		await insertPraga({
+			name: tempPragaFile.name,
+			file: tempPragaFile.uri,
+			description: `Objetivo: ${objectives}`,
+			fazenda: property || "Indefinido",
+			praga: tempPragaName,
+			location: location ? `${location.coords.latitude},${location.coords.longitude}` : "Indisponível",
+			datetime: new Date().toISOString(),
+			photo: photoUri || undefined
+		} as any)
+
+		setShowPhotoPrompt(false);
+		setTempPragaName("");
+		setTempPragaFile(null);
+		isPhotoDecisionFlow.current = false;
+
+		Speech.speak(`Coleta salva com sucesso.`, {
+			language: "pt-BR",
+			onDone: () => {
+				setTimeout(() => {
+					speakCommandVoice("O que deseja fazer agora?");
+				}, 1000);
+			}
+		});
+	};
+
+	const takePhoto = async () => {
+		const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+		if (permissionResult.granted === false) {
+			Alert.alert("Permissão negada", "Você recusou a permissão da câmera.");
+			savePraga(null);
+			return;
+		}
+
+		const result = await ImagePicker.launchCameraAsync({
+			mediaTypes: ImagePicker.MediaTypeOptions.Images,
+			allowsEditing: false,
+			quality: 0.5,
+		});
+
+		if (!result.canceled) {
+			savePraga(result.assets[0].uri);
+		} else {
+			savePraga(null);
+		}
+	};
+
+	const processPhotoDecision = useCallback(async (text: string) => {
+		const cleanText = text.trim().toLowerCase();
+		if (cleanText.includes("sim") || cleanText.includes("tirar") || cleanText.includes("foto") || cleanText.includes("pode")) {
+			recognizingStop();
+			await takePhoto();
+		} else if (cleanText.includes("não") || cleanText.includes("cancelar") || cleanText.includes("sem")) {
+			recognizingStop();
+			await savePraga(null);
+		}
+	}, [tempPragaName, tempPragaFile]);
+
 
 
 	// ... (other functions)
@@ -532,10 +607,13 @@ export default function RecordScreen() {
 					recognizingStop()
 				}
 
-				// Handle Start Day Flow
 				if (isStartDayFlow.current && t.trim().length > 0) {
-					// We wait for final result or timeout usually, but if we want faster interaction:
-					// For now let's wait for silence/timeout to ensure full sentence
+					recognizingStop();
+					processStartDayStep(transcriptRef.current);
+				}
+
+				if (isPhotoDecisionFlow.current && t.trim().length > 0) {
+					processPhotoDecision(transcriptRef.current);
 				}
 			}
 		})
@@ -565,6 +643,10 @@ export default function RecordScreen() {
 					recognizingStop();
 					processStartDayStep(transcriptRef.current);
 				}
+
+				if (isPhotoDecisionFlow.current && t.trim().length > 0) {
+					processPhotoDecision(transcriptRef.current);
+				}
 			} else {
 				tryRunCommand(normalize(t))
 			}
@@ -580,6 +662,11 @@ export default function RecordScreen() {
 			if (isStartDayFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
 				recognizingStop();
 				processStartDayStep(transcriptRef.current);
+				return;
+			}
+
+			if (isPhotoDecisionFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
+				processPhotoDecision(transcriptRef.current);
 				return;
 			}
 
@@ -622,7 +709,8 @@ export default function RecordScreen() {
 				transcriptRef.current = "";
 				setResults([]);
 				recognizingStart("dictation");
-			}
+			},
+
 		});
 	};
 
@@ -656,6 +744,41 @@ export default function RecordScreen() {
 	}
 
 
+
+	if (showPhotoPrompt) {
+		return (
+			<View style={styles.container} className="justify-center">
+				<View className="flex-1 justify-center px-6">
+					<View className="mb-8 items-center">
+						<Text className="text-3xl text-black font-bold mb-4 text-center">
+							Deseja tirar uma foto da anomalia?
+						</Text>
+						<Text className="text-xl text-gray-600 mb-8 text-center">
+							{tempPragaName}
+						</Text>
+
+						<View className="flex-row gap-4 w-full">
+							<TouchableOpacity
+								className="flex-1 bg-green-600 py-6 rounded-2xl items-center shadow-lg"
+								onPress={() => { recognizingStop(); takePhoto(); }}
+							>
+								<Text className="text-white text-xl font-bold">SIM</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								className="flex-1 bg-gray-200 py-6 rounded-2xl items-center"
+								onPress={() => { recognizingStop(); savePraga(null); }}
+							>
+								<Text className="text-gray-800 text-xl font-bold">NÃO</Text>
+							</TouchableOpacity>
+						</View>
+						<Text className="text-gray-400 mt-8 text-center animate-pulse">
+							Diga "Sim" ou "Não"
+						</Text>
+					</View>
+				</View>
+			</View>
+		);
+	}
 
 	if (showColetaUI) {
 		return (

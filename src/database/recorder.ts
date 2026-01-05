@@ -92,3 +92,36 @@ export async function delRecorders(): Promise<boolean> {
 		console.log("delRecorders error =>" + error)
 	}
 }
+
+// Função para buscar gravações não sincronizadas
+export async function getRecordersNotSynced(): Promise<RecorderDTO[] | null> {
+	try {
+		const response = await tableRecoder
+			.select()
+			.from(recorderSchema.recorder)
+			.where(eq(recorderSchema.recorder.synced, 0))
+
+		if (!response || response.length === 0) {
+			return null
+		}
+
+		return response as RecorderDTO[]
+	} catch (error) {
+		console.log("getRecordersNotSynced error =>" + error)
+		return null
+	}
+}
+
+// Função para marcar gravação como sincronizada
+export async function markRecorderAsSynced(id: number) {
+	try {
+		await tableRecoder
+			.update(recorderSchema.recorder)
+			.set({ synced: 1 })
+			.where(eq(recorderSchema.recorder.id, id))
+		return true
+	} catch (error) {
+		console.log("markRecorderAsSynced error =>" + error)
+		return false
+	}
+}

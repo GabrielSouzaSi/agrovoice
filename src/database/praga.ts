@@ -6,7 +6,10 @@ import { PragaDTO } from "@/dtos/pragaDTO"
 // Função para inserir os dados da gração no banco
 export async function insertPraga(praga: PragaDTO) {
     try {
-        await tablePraga.insert(pragaSchema.praga).values(praga).run()
+        await tablePraga.insert(pragaSchema.praga).values({
+            ...praga,
+            photo: praga.photo || null
+        }).run()
         return true
     } catch (error) {
         console.log("insertPraga error =>" + error)
@@ -89,5 +92,38 @@ export async function delPraga(): Promise<boolean> {
         return true
     } catch (error) {
         console.log("delRecorders error =>" + error)
+    }
+}
+
+// Função para buscar pragas não sincronizadas
+export async function getPragaNotSynced(): Promise<PragaDTO[] | null> {
+    try {
+        const response = await tablePraga
+            .select()
+            .from(pragaSchema.praga)
+            .where(eq(pragaSchema.praga.synced, 0))
+
+        if (!response || response.length === 0) {
+            return null
+        }
+
+        return response as PragaDTO[]
+    } catch (error) {
+        console.log("getPragaNotSynced error =>" + error)
+        return null
+    }
+}
+
+// Função para marcar praga como sincronizada
+export async function markPragaAsSynced(id: number) {
+    try {
+        await tablePraga
+            .update(pragaSchema.praga)
+            .set({ synced: 1 })
+            .where(eq(pragaSchema.praga.id, id))
+        return true
+    } catch (error) {
+        console.log("markPragaAsSynced error =>" + error)
+        return false
     }
 }
