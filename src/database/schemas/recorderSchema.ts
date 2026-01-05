@@ -9,5 +9,6 @@ export const recorder = sqliteTable("recorders", {
 	transcription: text("transcription"),
 	file: text("file"),
 	location: text("location"),
-	datetime: text("datetime")
+	datetime: text("datetime"),
+	synced: integer("synced").default(0)
 })

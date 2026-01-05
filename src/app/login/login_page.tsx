@@ -22,6 +22,8 @@ export default function LoginScreen() {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleLogin = async () => {
+        router.replace('/(tabs)');
+
         if (!email || !password) {
             Alert.alert('Erro', 'Por favor, preencha todos os campos.');
             return;

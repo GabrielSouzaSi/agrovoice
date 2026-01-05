@@ -1,46 +1,35 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 
 export default function SettingsScreen() {
+  const router = useRouter();
+
   const settingsItems = [
     {
-      title: 'Voice Recognition',
-      description: 'Configure voice command settings',
+      title: 'Calibragem',
+      description: 'Calibragem de voz',
+      onPress: () => router.push('/calibration/calibration_page'),
     },
-    {
-      title: 'Storage',
-      description: 'Manage recording storage and backup',
-    },
-    {
-      title: 'Location Services',
-      description: 'Configure GPS and location settings',
-    },
-    {
-      title: 'Sync Settings',
-      description: 'Configure automatic synchronization',
-    },
-    {
-      title: 'About',
-      description: 'App information and credits',
-    },
+
   ];
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Settings</Text>
+      <Text style={styles.title}>Configurações</Text>
 
       <View style={styles.settingsList}>
         {settingsItems.map((item, index) => (
           <TouchableOpacity
             key={index}
             style={styles.settingItem}
-            onPress={() => {}}>
+            onPress={item.onPress}>
             <View style={styles.settingInfo}>
               <Text style={styles.settingTitle}>{item.title}</Text>
               <Text style={styles.settingDescription}>{item.description}</Text>
             </View>
-            <ChevronRight size={20} color="#666" />
+            <ChevronRight size={20} color="#999" />
           </TouchableOpacity>
         ))}
       </View>
@@ -51,13 +40,13 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#FFFFFF',
     padding: 16,
   },
   title: {
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
-    color: '#fff',
+    color: '#1a1a1a',
     marginTop: 60,
     marginBottom: 20,
   },
@@ -65,7 +54,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   settingItem: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#F5F5F5',
     borderRadius: 8,
     padding: 16,
     flexDirection: 'row',
@@ -76,7 +65,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingTitle: {
-    color: '#fff',
+    color: '#1a1a1a',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     marginBottom: 4,

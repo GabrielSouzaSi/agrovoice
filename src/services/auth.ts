@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { setConfig } from '@/database/config';
 
 const API_URL = 'https://api.simids.cpafrr.embrapa.br/api/jwt-token/';
 const TOKEN_KEY = 'auth_token';
@@ -35,6 +36,19 @@ export const authService = {
             }
 
             const data = await response.json();
+
+            // Salvar valores permitidos e usuário se retornados pela API
+            if (data.allowed_values || data.user) {
+                await setConfig('current_config', {
+                    objetivos_list: data.allowed_values?.objectives,
+                    property_list: data.allowed_values?.properties,
+                    fields_list: data.allowed_values?.fields,
+                    user: data.user
+                });
+            }
+
+            return data;
+
             return data;
         } catch (error) {
             console.error('Login error:', error);
