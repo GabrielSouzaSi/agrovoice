@@ -57,7 +57,7 @@ export default function LoginScreen() {
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.container}
+            className='flex-1 bg-white'
         >
             <StatusBar barStyle="light-content" backgroundColor="#09090b" />
 
@@ -125,10 +125,7 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#ffffff', // Zinc 950
-    },
+
     content: {
         flex: 1,
         justifyContent: 'center',
