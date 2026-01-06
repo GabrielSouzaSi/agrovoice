@@ -24,6 +24,7 @@ import { insertPraga } from "@/database/praga"
 import React from "react"
 import { findBestMatch } from "@/lib/validation"
 import * as ImagePicker from 'expo-image-picker';
+import { cameraSave } from "@/lib/cameraSave";
 
 
 function normalize(text: string) {
@@ -350,24 +351,8 @@ export default function RecordScreen() {
 	};
 
 	const takePhoto = async () => {
-		const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-		if (permissionResult.granted === false) {
-			Alert.alert("Permissão negada", "Você recusou a permissão da câmera.");
-			savePraga(null);
-			return;
-		}
-
-		const result = await ImagePicker.launchCameraAsync({
-			mediaTypes: ImagePicker.MediaTypeOptions.Images,
-			allowsEditing: false,
-			quality: 0.5,
-		});
-
-		if (!result.canceled) {
-			savePraga(result.assets[0].uri);
-		} else {
-			savePraga(null);
-		}
+		let result = await cameraSave()
+		await savePraga(result)
 	};
 
 	const processPhotoDecision = useCallback(async (text: string) => {
@@ -375,6 +360,7 @@ export default function RecordScreen() {
 		if (cleanText.includes("sim") || cleanText.includes("tirar") || cleanText.includes("foto") || cleanText.includes("pode")) {
 			await recognizingStop();
 			await takePhoto();
+			
 		} else if (cleanText.includes("não") || cleanText.includes("cancelar") || cleanText.includes("sem")) {
 			await recognizingStop();
 			await savePraga(null);
