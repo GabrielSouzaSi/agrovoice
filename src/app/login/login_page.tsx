@@ -24,10 +24,10 @@ export default function LoginScreen() {
     const handleLogin = async () => {
         router.replace('/(tabs)');
 
-        if (!email || !password) {
-            Alert.alert('Erro', 'Por favor, preencha todos os campos.');
-            return;
-        }
+        // if (!email || !password) {
+        //     Alert.alert('Erro', 'Por favor, preencha todos os campos.');
+        //     return;
+        // }
 
         setIsLoading(true);
 

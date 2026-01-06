@@ -13,3 +13,10 @@ Um aplicativo para coleta de pragas
 - Microinterações
 - Feedback Visual
 - Feedback tátil e sonoro
+
+### 🧩 Funcionaliades
+- Login
+- Reconhecimentos de voz
+- Celetar dados do gps
+- Registro fotográfico
+- Funcionamento on/off

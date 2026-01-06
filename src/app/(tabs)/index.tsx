@@ -62,29 +62,6 @@ const COMMAND_GRAMMAR = [
 	"dia",
 ]
 
-
-
-const styles = StyleSheet.create({
-	contentContainer: {
-		flex: 1,
-		alignItems: 'center',
-		padding: 20,
-		backgroundColor: '#ffffff',
-	},
-	title: {
-		fontSize: 24,
-		fontFamily: "Inter_700Bold",
-		color: "#000000",
-		marginTop: 60,
-		marginBottom: 20,
-	},
-	container: {
-		flex: 1,
-		backgroundColor: "#ffffff",
-		padding: 16,
-	},
-});
-
 export default function RecordScreen() {
 	const [isDayStarted, setIsDayStarted] = useState(false);
 	const [showColetaUI, setShowColetaUI] = useState(false);
@@ -568,7 +545,7 @@ export default function RecordScreen() {
 
 	if (showPhotoPrompt) {
 		return (
-			<View style={styles.container} className="justify-center">
+			<View className="justify-center items-center flex-1 bg-white p-5">
 				<View className="flex-1 justify-center px-6">
 					<View className="mb-8 items-center">
 						<Text className="text-3xl text-black font-bold mb-4 text-center">
@@ -603,7 +580,7 @@ export default function RecordScreen() {
 
 	if (showColetaUI) {
 		return (
-			<View style={styles.container} className="justify-center">
+			<View className="flex-1 justify-center bg-white p-4">
 				<View className="flex-1 justify-center px-6">
 					<TouchableOpacity
 						onPress={() => { setShowColetaUI(false); isColetaFlow.current = false; recognizingStop(); }}
@@ -631,8 +608,8 @@ export default function RecordScreen() {
 	// etapa 1
 	if (!isDayStarted) {
 		return (
-			<View style={styles.container} className="items-center justify-center">
-				<Text style={styles.title}>AgroVoice</Text>
+			<View className="flex-1 items-center justify-center bg-white p-4">
+				<Text className="text-2xl font-bold mt-14 mb-5">AgroVoice</Text>
 				<TouchableOpacity
 					className="bg-green-400 px-20 py-10 rounded-full shadow-lg elevation-lg"
 					onPress={handleStartDay}
@@ -640,23 +617,28 @@ export default function RecordScreen() {
 					<Text className="text-white text-x2 font-bold">INICIAR DIA</Text>
 				</TouchableOpacity>
 			</View>
-		);
+		)
 	}
 
 	return (
-		<View style={styles.container}>
+		<View className="flex-1 justify-center bg-white p-4">
 			<View className="absolute top-10 right-4 z-10">
-				<TouchableOpacity onPress={handleEndDay} className="bg-red-500/20 px-8 py-4 rounded-full">
+				<TouchableOpacity
+					onPress={handleEndDay}
+					className="bg-red-500/20 px-8 py-4 rounded-full"
+				>
 					<Text className="text-red-400 text-base font-bold">FINALIZAR DIA</Text>
 				</TouchableOpacity>
 			</View>
 
 			<View>
 				<View className="p-4 rounded-lg mb-2">
-					<Text style={styles.title}>Agro</Text>
+					<Text className="text-2xl font-bold mt-14 mb-5">Agro</Text>
 					<Text className="text-black text-lg font-light">
 						{recognizing
-							? mode === "commands" ? "Escutando comando..." : "Gravando voz..."
+							? mode === "commands"
+								? "Escutando comando..."
+								: "Gravando voz..."
 							: "Pressione o botão e fale um comando"}
 					</Text>
 				</View>
