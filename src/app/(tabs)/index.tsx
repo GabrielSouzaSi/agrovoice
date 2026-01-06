@@ -22,7 +22,6 @@ import { buildRecordingName } from "@/lib/fileName"
 import { insertRecorder } from "@/database/recorder"
 import { insertPraga } from "@/database/praga"
 import React from "react"
-import { useAllowedValues } from "@/data/allowedValues"
 import { findBestMatch } from "@/lib/validation"
 import * as ImagePicker from 'expo-image-picker';
 
@@ -87,15 +86,7 @@ const styles = StyleSheet.create({
 
 export default function RecordScreen() {
 	const [isDayStarted, setIsDayStarted] = useState(false);
-	const [showForm, setShowForm] = useState(false);
 	const [showColetaUI, setShowColetaUI] = useState(false);
-	const [startDayStep, setStartDayStep] = useState<"idle" | "objectives" | "property" | "field" | "confirm">("idle");
-	const { objectives: ALLOWED_OBJECTIVES, properties: ALLOWED_PROPERTIES, fields: ALLOWED_FIELDS } = useAllowedValues();
-
-	// Form State
-	const [objectives, setObjectives] = useState("");
-	const [property, setProperty] = useState("");
-	const [field, setField] = useState("");
 
 	// --- Voice Assistant State ---
 	const [source, setSource] = useState<{ uri: string } | null>(null)
@@ -142,7 +133,6 @@ export default function RecordScreen() {
 	const recognizingRef = useRef(false)
 	const transcriptRef = useRef("")
 	const isColetaFlow = useRef(false)
-	const isStartDayFlow = useRef(false)
 
 	// Permissions
 	const [perm, setPerm] = useState<"undetermined" | "denied" | "granted">("undetermined")
@@ -219,34 +209,28 @@ export default function RecordScreen() {
 				let saved = await persistFromCache(recorder.uri, { targetSubdir: "recordings", overwrite: false, filename })
 				let location = await statusGPS()
 
-				if (isColetaFlow.current) {
-					// Logic for Coleta Command
-					const pestName = transcriptRef.current.trim() || "Não identificado";
+				// Logic for Coleta Command
+				const pestName = transcriptRef.current.trim() || "Não identificado";
 
-					// Store temp data and ask for photo
-					setTempPragaName(pestName);
-					setTempPragaFile(saved);
-					isColetaFlow.current = false;
-					isPhotoDecisionFlow.current = true;
-					setShowColetaUI(false); // Hide the "Qual anomalia?" UI
-					setShowPhotoPrompt(true); // Show the "Deseja foto?" UI
+				// Store temp data and ask for photo
+				setTempPragaName(pestName);
+				setTempPragaFile(saved);
+				isColetaFlow.current = false;
+				isPhotoDecisionFlow.current = true;
+				setShowColetaUI(false); // Hide the "Qual anomalia?" UI
+				setShowPhotoPrompt(true); // Show the "Deseja foto?" UI
 
-					Speech.speak(`Entendi ${pestName}. Deseja tirar uma foto?`, {
-						language: "pt-BR",
-						onDone: () => {
-							transcriptRef.current = "";
-							setResults([]);
-							recognizingStart("dictation");
-						}
-					});
-					// We don't save yet. We wait for the photo decision.
-				} else if (isStartDayFlow.current) {
-					// Logic for Start Day Flow is handled in onResult/onFinal mostly, 
-					// but if we stop recording, we might need to trigger next step if we have a result.
-					// For now, let's rely on the silence timeout or manual stop to trigger processing in onFinal/onTimeout
-				}
-				return
+				Speech.speak(`Entendi ${pestName}. Deseja tirar uma foto?`, {
+					language: "pt-BR",
+					onDone: () => {
+						transcriptRef.current = "";
+						setResults([]);
+						recognizingStart("dictation");
+					}
+				});
+				// We don't save yet. We wait for the photo decision.
 			}
+			return
 		} catch (e) {
 			console.error("stop:", e)
 		} finally {
@@ -258,13 +242,13 @@ export default function RecordScreen() {
 			setResult("")
 			if (isRecording) {
 				setTimeout(() => {
-					if (!isStartDayFlow.current && !isColetaFlow.current && !isPhotoDecisionFlow.current) {
+					if (!isColetaFlow.current && !isPhotoDecisionFlow.current) {
 						speakCommandVoice()
 					}
 				}, 5000)
 			}
 		}
-	}, [vosk, objectives, property, field])
+	}, [vosk])
 
 	const speakCommandVoice = useCallback(async (message = "Estou ouvindo") => {
 		setLastSpokenMessage(message)
@@ -333,98 +317,7 @@ export default function RecordScreen() {
 		})
 	}, [recognizingStop, recognizingStart])
 
-	const processStartDayStep = useCallback(async (text: string) => {
-		const cleanText = text.trim();
-		if (!cleanText) return;
 
-		if (startDayStep === "objectives") {
-			const match = findBestMatch(cleanText, ALLOWED_OBJECTIVES);
-			if (match) {
-				setObjectives(match);
-				setStartDayStep("property");
-				Speech.speak(`Entendido: ${match}. Qual é a propriedade? Tente: ${ALLOWED_PROPERTIES.slice(0, 2).join(", ")}.`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			} else {
-				Speech.speak(`Não entendi. As opções são: ${ALLOWED_OBJECTIVES.slice(0, 3).join(", ")} e outros. Tente novamente.`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			}
-		} else if (startDayStep === "property") {
-			const match = findBestMatch(cleanText, ALLOWED_PROPERTIES);
-			if (match) {
-				setProperty(match);
-				setStartDayStep("field");
-				Speech.speak(`Certo: ${match}. Qual é o talhão? Tente 01 até 10`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			} else {
-				Speech.speak(`Propriedade não encontrada. Tente: ${ALLOWED_PROPERTIES.slice(0, 2).join(", ")}.`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			}
-		} else if (startDayStep === "field") {
-			// For fields, we might want to be more lenient or strict. Let's be strict for now as requested.
-			// But numeric voice input can be tricky ("um" vs "1"). 
-			// Our findBestMatch handles string inclusion, so "talhão 05" might match "05".
-			const match = findBestMatch(cleanText, ALLOWED_FIELDS);
-			if (match) {
-				setField(match);
-				setStartDayStep("confirm");
-				Speech.speak(`Confirmando. Objetivo: ${objectives}, Propriedade: ${property}, Talhão: ${match}. Posso iniciar?`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation"); // Listen for confirmation
-					}
-				});
-			} else {
-				Speech.speak(`Talhão inválido. Exemplos: 01, 05, 10.`, {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			}
-		} else if (startDayStep === "confirm") {
-			const lower = cleanText.toLowerCase();
-			if (lower.includes("sim") || lower.includes("confirmar") || lower.includes("pode") || lower.includes("iniciar")) {
-				handleConfirmStartDay();
-			} else {
-				Speech.speak("Não entendi. Diga 'Sim' para confirmar ou 'Cancelar' para parar.", {
-					language: "pt-BR",
-					onDone: () => {
-						transcriptRef.current = "";
-						setResults([]);
-						recognizingStart("dictation");
-					}
-				});
-			}
-		}
-	}, [startDayStep, objectives, property, recognizingStart]);
 
 	const [lastSpokenMessage, setLastSpokenMessage] = useState("")
 
@@ -433,8 +326,8 @@ export default function RecordScreen() {
 		await insertPraga({
 			name: tempPragaFile.name,
 			file: tempPragaFile.uri,
-			description: `Objetivo: ${objectives}`,
-			fazenda: property || "Indefinido",
+			description: `Coleta de anomalia`,
+			fazenda: "Indefinido",
 			praga: tempPragaName,
 			location: location ? `${location.coords.latitude},${location.coords.longitude}` : "Indisponível",
 			datetime: new Date().toISOString(),
@@ -480,10 +373,10 @@ export default function RecordScreen() {
 	const processPhotoDecision = useCallback(async (text: string) => {
 		const cleanText = text.trim().toLowerCase();
 		if (cleanText.includes("sim") || cleanText.includes("tirar") || cleanText.includes("foto") || cleanText.includes("pode")) {
-			recognizingStop();
+			await recognizingStop();
 			await takePhoto();
 		} else if (cleanText.includes("não") || cleanText.includes("cancelar") || cleanText.includes("sem")) {
-			recognizingStop();
+			await recognizingStop();
 			await savePraga(null);
 		}
 	}, [tempPragaName, tempPragaFile]);
@@ -541,12 +434,6 @@ export default function RecordScreen() {
 		setIsDayStarted(false);
 		recognizingStop();
 		Speech.stop();
-		// Reset form? Maybe keep for next day or clear. Let's clear.
-		setObjectives("");
-		setProperty("");
-		setField("");
-		setStartDayStep("idle");
-		isStartDayFlow.current = false;
 		setShowColetaUI(false);
 	}, [recognizingStop]);
 
@@ -607,11 +494,6 @@ export default function RecordScreen() {
 					recognizingStop()
 				}
 
-				if (isStartDayFlow.current && t.trim().length > 0) {
-					recognizingStop();
-					processStartDayStep(transcriptRef.current);
-				}
-
 				if (isPhotoDecisionFlow.current && t.trim().length > 0) {
 					processPhotoDecision(transcriptRef.current);
 				}
@@ -639,11 +521,6 @@ export default function RecordScreen() {
 					recognizingStop()
 				}
 
-				if (isStartDayFlow.current && t.trim().length > 0) {
-					recognizingStop();
-					processStartDayStep(transcriptRef.current);
-				}
-
 				if (isPhotoDecisionFlow.current && t.trim().length > 0) {
 					processPhotoDecision(transcriptRef.current);
 				}
@@ -657,12 +534,6 @@ export default function RecordScreen() {
 			if (isColetaFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
 				recognizingStop()
 				return
-			}
-
-			if (isStartDayFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
-				recognizingStop();
-				processStartDayStep(transcriptRef.current);
-				return;
 			}
 
 			if (isPhotoDecisionFlow.current && mode === "dictation" && transcriptRef.current.trim().length > 0) {
@@ -681,7 +552,7 @@ export default function RecordScreen() {
 			recognizingStop()
 		})
 		return () => { onResult.remove(); onPartial.remove(); onFinal.remove(); onError.remove(); onTimeout.remove() }
-	}, [vosk, tryRunCommand, mode, processStartDayStep])
+	}, [vosk, tryRunCommand, mode])
 
 	useFocusEffect(useCallback(() => { return () => { recognizingStop() } }, []))
 	useEffect(() => { recognizingRef.current = recognizing }, [recognizing])
@@ -700,48 +571,12 @@ export default function RecordScreen() {
 
 	// --- Start Day Logic ---
 	const handleStartDay = () => {
-		setShowForm(true);
-		setStartDayStep("objectives");
-		isStartDayFlow.current = true;
-		Speech.speak(`Qual é o objetivo do dia?  As opções são: ${ALLOWED_OBJECTIVES.slice(0, 3).join(", ")}`, {
-			language: "pt-BR",
-			onDone: () => {
-				transcriptRef.current = "";
-				setResults([]);
-				recognizingStart("dictation");
-			},
-
-		});
-	};
-
-	const handleConfirmStartDay = () => {
-		// If manually confirming, ensure we have data. 
-		// If voice confirming, we might have data in state already.
-		if (!objectives || !property || !field) {
-			Alert.alert("Atenção", "Preencha todos os campos para iniciar o dia.");
-			return;
-		}
-		setShowForm(false);
 		setIsDayStarted(true);
-		isStartDayFlow.current = false;
-		setStartDayStep("idle");
-
 		// Auto-start voice assistant
 		setTimeout(() => {
-			speakCommandVoice(`Dia iniciado na propriedade ${property}, talhão ${field}. O que deseja fazer?`);
+			speakCommandVoice(`Dia iniciado. O que deseja fazer?`);
 		}, 1000);
 	};
-
-	const handleCancelForm = () => {
-		setShowForm(false);
-		setObjectives("");
-		setProperty("");
-		setField("");
-		setStartDayStep("idle");
-		isStartDayFlow.current = false;
-		Speech.stop();
-		recognizingStop();
-	}
 
 
 
@@ -760,13 +595,13 @@ export default function RecordScreen() {
 						<View className="flex-row gap-4 w-full">
 							<TouchableOpacity
 								className="flex-1 bg-green-600 py-6 rounded-2xl items-center shadow-lg"
-								onPress={() => { recognizingStop(); takePhoto(); }}
+								onPress={async () => { await recognizingStop(); await takePhoto(); }}
 							>
 								<Text className="text-white text-xl font-bold">SIM</Text>
 							</TouchableOpacity>
 							<TouchableOpacity
 								className="flex-1 bg-gray-200 py-6 rounded-2xl items-center"
-								onPress={() => { recognizingStop(); savePraga(null); }}
+								onPress={async () => { await recognizingStop(); await savePraga(null); }}
 							>
 								<Text className="text-gray-800 text-xl font-bold">NÃO</Text>
 							</TouchableOpacity>
@@ -807,102 +642,7 @@ export default function RecordScreen() {
 		);
 	}
 
-	if (showForm) {
-		return (
-			<View style={styles.container} className="justify-center">
-				<View className="flex-1 justify-center px-6">
-					{/* Header / Cancel */}
-					<TouchableOpacity
-						onPress={handleCancelForm}
-						className="absolute top-10 right-4 z-20 bg-gray-100 p-2 rounded-full"
-					>
-						<Trash size={24} color="#ef4444" />
-					</TouchableOpacity>
-
-					{/* Step 1: Objectives */}
-					<View className={`mb-8 transition-all ${startDayStep === 'objectives' ? 'opacity-100' : 'opacity-40'}`}>
-						<Text className={`font-bold mb-5 ${startDayStep === 'objectives' ? 'text-3xl text-black' : 'text-xl text-gray-400'}`}>
-							1. Objetivo do Dia
-						</Text>
-						{startDayStep === 'objectives' && (
-							<View>
-								<Text className="text-4xl font-bold text-green-600 leading-tight">
-									{partial || objectives || "..."}
-								</Text>
-								{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
-							</View>
-						)}
-						{startDayStep !== 'objectives' && (
-							<Text className="text-2xl text-gray-800 font-medium">{objectives}</Text>
-						)}
-					</View>
-
-					{/* Step 2: Property */}
-					{(startDayStep === 'property' || startDayStep === 'field' || startDayStep === 'confirm') && (
-						<View className={`mb-8 transition-all ${startDayStep === 'property' ? 'opacity-100' : 'opacity-40'}`}>
-							<Text className={`font-bold mb-2 ${startDayStep === 'property' ? 'text-3xl text-black' : 'text-xl text-gray-400'}`}>
-								2. Propriedade
-							</Text>
-							{startDayStep === 'property' && (
-								<View>
-									<Text className="text-4xl font-bold text-green-600 leading-tight">
-										{partial || property || "..."}
-									</Text>
-									{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
-								</View>
-							)}
-							{startDayStep !== 'property' && (
-								<Text className="text-2xl text-gray-800 font-medium">{property}</Text>
-							)}
-						</View>
-					)}
-
-					{/* Step 3: Field */}
-					{(startDayStep === 'field' || startDayStep === 'confirm') && (
-						<View className={`mb-8 transition-all ${startDayStep === 'field' ? 'opacity-100' : 'opacity-40'}`}>
-							<Text className={`font-bold mb-2 ${startDayStep === 'field' ? 'text-3xl text-green-600' : 'text-xl text-gray-400'}`}>
-								3. Talhão
-							</Text>
-							{startDayStep === 'field' && (
-								<View>
-									<Text className="text-4xl font-bold text-green-600 leading-tight">
-										{partial || field || "..."}
-									</Text>
-									{recognizing && <Text className="text-sm text-green-500 mt-2 font-bold animate-pulse">Ouvindo...</Text>}
-								</View>
-							)}
-							{startDayStep !== 'field' && (
-								<Text className="text-2xl text-gray-800 font-medium">{field}</Text>
-							)}
-						</View>
-					)}
-
-					{/* Confirmation */}
-					{startDayStep === 'confirm' && (
-						<View className="mt-8 items-center">
-							<Text className="text-2xl font-bold text-center mb-6">Posso iniciar?</Text>
-							<View className="flex-row gap-4 w-full">
-								<TouchableOpacity
-									className="flex-1 bg-green-600 py-6 rounded-2xl items-center shadow-lg"
-									onPress={handleConfirmStartDay}
-								>
-									<Text className="text-white text-xl font-bold">SIM</Text>
-								</TouchableOpacity>
-								<TouchableOpacity
-									className="flex-1 bg-red-100 py-6 rounded-2xl items-center"
-									onPress={handleCancelForm}
-								>
-									<Text className="text-red-500 text-xl font-bold">NÃO</Text>
-								</TouchableOpacity>
-							</View>
-							<Text className="text-gray-400 mt-4 text-center">Diga "Sim" ou "Confirmar"</Text>
-						</View>
-					)}
-				</View>
-			</View>
-		);
-	}
-
+	// etapa 1
 	if (!isDayStarted) {
 		return (
 			<View style={styles.container} className="items-center justify-center">
