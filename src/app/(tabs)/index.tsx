@@ -42,20 +42,7 @@ function extractText(res: any) {
 }
 
 // Grammar por tokens (modo comandos)
-const COMMAND_GRAMMAR = [
-	"abrir",
-	"mapa",
-	"mostrar",
-	"perfil",
-	"saldo",
-	"meu",
-	"voltar",
-	"retornar",
-	"gravar",
-	"voz",
-	"o",
-	"[unk]",
-]
+const COMMAND_GRAMMAR = ["iniciar", "coleta", "retornar", "gravar", "voz", "o", "[unk]"]
 
 export default function RecordScreen() {
 	// fonte dinâmica para o player (será definida após a gravação)
@@ -247,35 +234,6 @@ export default function RecordScreen() {
 	}, [vosk])
 
 	// AÇÕES dentro do componente
-	const abrirMapa = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Abrindo mapa", {
-			language: "pt-BR",
-			onDone: () => {
-				// reinicia em modo ditado (sem grammar, timeout maior)
-				;(async () => {
-					setTimeout(() => {
-						recognizingStart("commands")
-					}, 5000)
-				})()
-			},
-		})
-	}, []) // sem deps de estado
-	const mostrarPerfil = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Mostrando perfil", { language: "pt-BR" })
-		console.log(">> mostrarPerfil()")
-	}, [])
-	const mostrarSaldo = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Mostrando saldo", { language: "pt-BR" })
-		console.log(">> mostrarSaldo()")
-	}, [])
-	const voltar = useCallback(() => {
-		Speech.stop()
-		Speech.speak("Voltando", { language: "pt-BR" })
-		console.log(">> voltar()")
-	}, [])
 	// “gravar voz” => trocar para modo ditado na MESMA instância
 	const gravarVoz = useCallback(async () => {
 		Speech.stop()
@@ -291,20 +249,23 @@ export default function RecordScreen() {
 		})
 	}, [recognizingStop, recognizingStart]) // sem deps de estado
 
+	const iniciarColeta = useCallback(() => {
+		Speech.stop()
+		Speech.speak("Coleta iniciada, qual o tipo de anomalia?", {
+			language: "pt-BR",
+			onDone: () => {
+				speakCommandVoice()
+			},
+		})
+	}, [])
+
 	// Padrões de comando
 	const COMMANDS = useMemo(
 		() => [
-			{ label: "abrir mapa", re: /(^|\s)abrir\s+(o\s+)?mapa(\s|$)/, run: abrirMapa },
-			{
-				label: "mostrar perfil",
-				re: /(^|\s)(mostrar\s+(o\s+)?)?perfil(\s|$)/,
-				run: mostrarPerfil,
-			},
-			{ label: "saldo", re: /(^|\s)(meu\s+)?saldo(\s|$)/, run: mostrarSaldo },
-			{ label: "voltar", re: /(^|\s)(voltar|retornar)(\s|$)/, run: voltar },
+			{ label: "iniciar coleta", re: /(^|\s)iniciar\s+coleta(\s|$)/, run: iniciarColeta },
 			{ label: "gravar voz", re: /(^|\s)gravar\s+voz(\s|$)/, run: gravarVoz },
 		],
-		[abrirMapa, mostrarPerfil, mostrarSaldo, voltar, gravarVoz],
+		[iniciarColeta, gravarVoz],
 	)
 
 	// Carrega modelo 1x
