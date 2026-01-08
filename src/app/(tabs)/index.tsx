@@ -1,5 +1,5 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { View, Text, TouchableOpacity, Alert } from "react-native"
+import { View, Text, TouchableOpacity, Alert, Modal } from "react-native"
 import { useFocusEffect } from "expo-router"
 import Vosk from "react-native-vosk"
 import * as Speech from "expo-speech"
@@ -17,6 +17,8 @@ import { persistFromCache } from "@/lib/fs"
 import { colors } from "@/styles/colors"
 import { buildRecordingName } from "@/lib/fileName"
 import { insertRecorder } from "@/database/recorder"
+import { CameraCapture, CameraCaptureRef } from "@/components/CameraCapture"
+import { CameraVideoRecorder, CameraVideoRecorderRef } from "@/components/CameraVideoRecorder"
 
 function normalize(text: string) {
 	return String(text || "")
@@ -42,9 +44,21 @@ function extractText(res: any) {
 }
 
 // Grammar por tokens (modo comandos)
-const COMMAND_GRAMMAR = ["iniciar", "coleta", "retornar", "gravar", "voz", "o", "[unk]"]
+const COMMAND_GRAMMAR = [
+	"iniciar",
+	"coleta",
+	"retornar",
+	"gravar",
+	"voz",
+	"video",
+	"tirar",
+	"foto",
+	"o",
+	"[unk]",
+]
 
 export default function RecordScreen() {
+	const [visible, setVisible] = useState(false)
 	// fonte dinâmica para o player (será definida após a gravação)
 	const [source, setSource] = useState<{ uri: string } | null>(null)
 	// player vinculado à fonte acima
@@ -59,6 +73,12 @@ export default function RecordScreen() {
 	const [lastCommand, setLastCommand] = useState("(nenhum)")
 	const [mode, setMode] = useState<"commands" | "dictation">("commands") // <- novo
 
+	const cameraRef = useRef<CameraCaptureRef>(null)
+	const videoRecorderRef = useRef<CameraVideoRecorderRef>(null)
+
+	const [photo, setPhoto] = useState<boolean>(false)
+	const [video, setVideo] = useState<boolean>(false)
+
 	const startingRef = useRef(false)
 	const commandFiredRef = useRef(false)
 	const partialRef = useRef("")
@@ -67,6 +87,36 @@ export default function RecordScreen() {
 
 	// ref para acumular tudo
 	const transcriptRef = useRef("")
+
+	// Solicitar permissão do GPS
+	async function getPermissionGPS() {
+		const { status } = await Location.requestForegroundPermissionsAsync()
+
+		if (status !== "granted") {
+			Alert.alert("Permissão negada", "Dê permissão da localização para continuar.", [
+				{ text: "OK", onPress: () => getPermissionGPS() },
+			])
+			return
+		} else {
+			await statusGPS()
+		}
+	}
+	// Verificar se o GPS está ativado
+	async function statusGPS() {
+		const isGPSEnabled = await Location.hasServicesEnabledAsync()
+
+		if (!isGPSEnabled) {
+			Alert.alert("GPS desativado", "Ative o GPS para capturar a localização.")
+			return false
+		} else {
+			// Capturar localização
+			const userLocation = await Location.getCurrentPositionAsync({
+				accuracy: Location.Accuracy.High,
+			})
+			// Armazena a localização no estado
+			return userLocation
+		}
+	}
 
 	// estado de permissão de gravação (mic)
 	const [perm, setPerm] = useState<"undetermined" | "denied" | "granted">("undetermined")
@@ -82,6 +132,16 @@ export default function RecordScreen() {
 			}
 		})()
 	}, [])
+
+	// Carrega modelo 1x
+	useEffect(() => {
+		vosk.loadModel("vosk-model-pt")
+			.then(() => setReady(true))
+			.catch((e) => console.error("loadModel:", e))
+		return () => {
+			vosk.unload()
+		}
+	}, [vosk])
 
 	const recorder = useAudioRecorder({
 		isMeteringEnabled: true,
@@ -264,19 +324,11 @@ export default function RecordScreen() {
 		() => [
 			{ label: "iniciar coleta", re: /(^|\s)iniciar\s+coleta(\s|$)/, run: iniciarColeta },
 			{ label: "gravar voz", re: /(^|\s)gravar\s+voz(\s|$)/, run: gravarVoz },
+			{ label: "gravar voz", re: /(^|\s)tirar\s+foto(\s|$)/, run: takePhoto },
+			{ label: "gravar voz", re: /(^|\s)gravar\s+video(\s|$)/, run: startVideoRecording },
 		],
 		[iniciarColeta, gravarVoz],
 	)
-
-	// Carrega modelo 1x
-	useEffect(() => {
-		vosk.loadModel("vosk-model-pt")
-			.then(() => setReady(true))
-			.catch((e) => console.error("loadModel:", e))
-		return () => {
-			vosk.unload()
-		}
-	}, [vosk])
 
 	// Dispara 1 comando por ciclo
 	const tryRunCommand = useCallback(
@@ -316,6 +368,56 @@ export default function RecordScreen() {
 			},
 		})
 	}, [])
+
+	async function takePhoto() {
+		console.log("tirar foto");
+		
+		setPhoto(true)
+		setVisible(true)
+		const timer = setTimeout(async () => {
+			try {
+				const uri = await cameraRef.current.takePhoto()
+
+				console.log("Foto salva em:", uri)
+			} catch (error) {
+				console.error("Erro ao tirar foto", error)
+			} finally {
+				setVisible(false)
+				setPhoto(false)
+				await recognizingStop()
+				await speakCommandVoice()
+			}
+		}, 3000)
+	}
+	function sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms))
+	}
+
+	async function startVideoRecording() {
+		console.log("iniciar gravação de vídeo")
+
+		setVideo(true)
+		setVisible(true)
+
+		// dá tempo para o componente Camera montar
+		await sleep(250)
+
+		await videoRecorderRef.current?.startRecording()
+
+		setTimeout(async () => {
+			try {
+				const uri = await videoRecorderRef.current?.stopRecording()
+				console.log("VIDEO:", uri)
+			} catch (error) {
+				console.error("Erro ao gravar vídeo", error)
+			} finally {
+				setVisible(false)
+				setVideo(false)
+				await recognizingStop()
+				await speakCommandVoice()
+			}
+		}, 10000)
+	}
 
 	// Listeners
 	useEffect(() => {
@@ -408,86 +510,64 @@ export default function RecordScreen() {
 		if (results.length > 0) console.log(results.join(" "))
 	}, [results])
 
-	// Solicitar permissão
-	async function getPermissionGPS() {
-		const { status } = await Location.requestForegroundPermissionsAsync()
-
-		if (status !== "granted") {
-			Alert.alert("Permissão negada", "Dê permissão da localização para continuar.", [
-				{ text: "OK", onPress: () => getPermissionGPS() },
-			])
-			return
-		} else {
-			await statusGPS()
-		}
-	}
-	// Verificar se o GPS está ativado
-	async function statusGPS() {
-		const isGPSEnabled = await Location.hasServicesEnabledAsync()
-
-		if (!isGPSEnabled) {
-			Alert.alert("GPS desativado", "Ative o GPS para capturar a localização.")
-			return false
-		} else {
-			// Capturar localização
-			const userLocation = await Location.getCurrentPositionAsync({
-				accuracy: Location.Accuracy.High,
-			})
-			// Armazena a localização no estado
-			return userLocation
-		}
-	}
-
 	useEffect(() => {
 		getPermissionGPS()
 	}, [])
 
 	return (
-		<View className="flex-1 justify-center items-center bg-gray-1000 gap-3 p-4">
-			{/* {source?.uri && <Button title="play" onPress={() => player.play()} />} */}
-			<View className="absolute top-24 p-4 rounded-lg bg-gray-900">
-				<Text className="text-white-500 text-lg font-semiBold">
-					{recognizing
-						? mode === "commands"
-							? "Escutando comando..."
-							: "Gravando voz..."
-						: "Pressione o botão e fale um comando"}
-				</Text>
-			</View>
-
-			<View className="absolute top-44 p-4 rounded-lg bg-gray-900 w-11/12">
-				{!!partial && (
-					<Text className="text-gray-500 text-sm font-semiBold italic">
-						Escutando: {partial}
+		<>
+			<View className="flex-1 justify-center items-center bg-gray-1000 gap-3">
+				{/* {source?.uri && <Button title="play" onPress={() => player.play()} />} */}
+				<View className="absolute top-24 p-4 rounded-lg bg-gray-900">
+					<Text className="text-white-500 text-lg font-semiBold">
+						{recognizing
+							? mode === "commands"
+								? "Escutando comando..."
+								: "Gravando voz..."
+							: "Pressione o botão e fale um comando"}
 					</Text>
-				)}
-				<Text className="text-gray-500 text-sm font-semiBold italic mt-2">
-					Último comando: {lastCommand}
-				</Text>
-			</View>
+				</View>
 
-			<View className="items-center justify-center">
-				<TouchableOpacity
-					className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${recognizing ? "bg-red-500" : ""}`}
-					disabled={!ready || startingRef.current}
-					onPress={() => (recognizing ? recognizingStop() : speakCommandVoice())}
-				>
-					{recognizing ? (
-						<Square size={32} color="#fff" />
-					) : (
-						<Mic size={32} color="#fff" />
+				<View className="absolute top-44 p-4 rounded-lg bg-gray-900 w-11/12">
+					{!!partial && (
+						<Text className="text-gray-500 text-sm font-semiBold italic">
+							Escutando: {partial}
+						</Text>
 					)}
-				</TouchableOpacity>
-			</View>
+					<Text className="text-gray-500 text-sm font-semiBold italic mt-2">
+						Último comando: {lastCommand}
+					</Text>
+				</View>
 
-			{recognizing && (
-				<TouchableOpacity
-					className="absolute bottom-10 p-4 rounded-lg bg-gray-900"
-					onPress={clearText}
-				>
-					<Trash size={24} color={colors.red[500]} />
-				</TouchableOpacity>
-			)}
-		</View>
+				<View className="items-center justify-center">
+					<TouchableOpacity
+						className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${recognizing ? "bg-red-500" : ""}`}
+						disabled={!ready || startingRef.current}
+						onPress={() => (recognizing ? recognizingStop() : speakCommandVoice())}
+					>
+						{recognizing ? (
+							<Square size={32} color="#fff" />
+						) : (
+							<Mic size={32} color="#fff" />
+						)}
+					</TouchableOpacity>
+				</View>
+
+				{recognizing && (
+					<TouchableOpacity
+						className="absolute bottom-10 p-4 rounded-lg bg-gray-900"
+						onPress={clearText}
+					>
+						<Trash size={24} color={colors.red[500]} />
+					</TouchableOpacity>
+				)}
+			</View>
+			<Modal visible={visible} animationType="slide">
+				<View className="flex-1">
+					{photo && <CameraCapture ref={cameraRef} />}
+					{video && <CameraVideoRecorder ref={videoRecorderRef} />}
+				</View>
+			</Modal>
+		</>
 	)
 }

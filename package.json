@@ -38,7 +38,8 @@
     "react-native-svg": "15.11.2",
     "react-native-vosk": "^0.3.3",
     "expo-speech": "~13.1.7",
-    "expo-location": "~18.1.6"
+    "expo-location": "~18.1.6",
+    "expo-camera": "~16.1.11"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
