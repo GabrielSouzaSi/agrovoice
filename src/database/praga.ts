@@ -6,10 +6,7 @@ import { PragaDTO } from "@/dtos/pragaDTO"
 // Função para inserir os dados da gração no banco
 export async function insertPraga(praga: PragaDTO) {
     try {
-        await tablePraga.insert(pragaSchema.praga).values({
-            ...praga,
-            photo: praga.photo || null
-        }).run()
+        await tablePraga.insert(pragaSchema.praga).values(praga).run()
         return true
     } catch (error) {
         console.log("insertPraga error =>" + error)

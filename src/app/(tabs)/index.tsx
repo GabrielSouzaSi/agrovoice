@@ -94,9 +94,15 @@ export default function RecordScreen() {
 	const [tempPragaFile, setTempPragaFile] = useState<any>(null)
 	const isPhotoDecisionFlow = useRef(false)
 
+	// Media State
+	const [imagens, setImagens] = useState<string[]>([])
+	const [videos, setVideos] = useState<string[]>([])
+
+	// Camera State
 	const cameraRef = useRef<CameraCaptureRef>(null)
 	const videoRecorderRef = useRef<CameraVideoRecorderRef>(null)
 
+	// modal states
 	const [photo, setPhoto] = useState<boolean>(false)
 	const [video, setVideo] = useState<boolean>(false)
 
@@ -356,7 +362,9 @@ export default function RecordScreen() {
 				const uri = await cameraRef.current.takePhoto()
 
 				console.log("Foto salva em:", uri)
-				await savePraga(uri)
+				// salva a imagem no array
+				setImagens((prev) => [...prev, uri])
+				
 			} catch (error) {
 				console.error("Erro ao tirar foto", error)
 			} finally {
