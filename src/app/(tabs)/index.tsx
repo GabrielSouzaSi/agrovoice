@@ -7,7 +7,7 @@ import Animated, {
 	Easing,
 	withSequence,
 } from "react-native-reanimated"
-import { View, Text, TouchableOpacity, Alert } from "react-native"
+import { View, Text, TouchableOpacity, Alert, Modal } from "react-native"
 import { useFocusEffect } from "expo-router"
 import Vosk from "react-native-vosk"
 
@@ -28,6 +28,8 @@ import { insertPraga } from "@/database/praga"
 import React from "react"
 import { cameraSave } from "@/lib/cameraSave"
 import { ProjectInfoCard } from "@/components/ProjectInfoCard"
+import { CameraCapture, CameraCaptureRef } from "@/components/CameraCapture"
+import { CameraVideoRecorder, CameraVideoRecorderRef } from "@/components/CameraVideoRecorder"
 
 function normalize(text: string) {
 	return String(text || "")
@@ -63,9 +65,13 @@ const COMMAND_GRAMMAR = [
 	"tirar",
 	"foto",
 	"dia",
+	"gravar",
+	"voz",
+	"vídeo",
 ]
 
 export default function RecordScreen() {
+	const [visible, setVisible] = useState(false)
 	const [isDayStarted, setIsDayStarted] = useState(false)
 	const [showColetaUI, setShowColetaUI] = useState(false)
 
@@ -87,6 +93,12 @@ export default function RecordScreen() {
 	const [tempPragaName, setTempPragaName] = useState("")
 	const [tempPragaFile, setTempPragaFile] = useState<any>(null)
 	const isPhotoDecisionFlow = useRef(false)
+
+	const cameraRef = useRef<CameraCaptureRef>(null)
+	const videoRecorderRef = useRef<CameraVideoRecorderRef>(null)
+
+	const [photo, setPhoto] = useState<boolean>(false)
+	const [video, setVideo] = useState<boolean>(false)
 
 	// Animation
 	const pulseAnim = useSharedValue(1)
@@ -334,9 +346,55 @@ export default function RecordScreen() {
 		})
 	}
 
-	const takePhoto = async () => {
-		let result = await cameraSave()
-		await savePraga(result)
+	async function takePhoto() {
+		console.log("tirar foto")
+
+		setPhoto(true)
+		setVisible(true)
+		const timer = setTimeout(async () => {
+			try {
+				const uri = await cameraRef.current.takePhoto()
+
+				console.log("Foto salva em:", uri)
+				await savePraga(uri)
+			} catch (error) {
+				console.error("Erro ao tirar foto", error)
+			} finally {
+				setVisible(false)
+				setPhoto(false)
+				await recognizingStop()
+				await speakCommandVoice()
+			}
+		}, 3000)
+	}
+	function sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms))
+	}
+
+	async function startVideoRecording() {
+		console.log("iniciar gravação de vídeo")
+
+		setVideo(true)
+		setVisible(true)
+
+		// dá tempo para o componente Camera montar
+		await sleep(250)
+
+		await videoRecorderRef.current?.startRecording()
+
+		setTimeout(async () => {
+			try {
+				const uri = await videoRecorderRef.current?.stopRecording()
+				console.log("VIDEO:", uri)
+			} catch (error) {
+				console.error("Erro ao gravar vídeo", error)
+			} finally {
+				setVisible(false)
+				setVideo(false)
+				await recognizingStop()
+				await speakCommandVoice()
+			}
+		}, 10000)
 	}
 
 	const processPhotoDecision = useCallback(
@@ -431,8 +489,9 @@ export default function RecordScreen() {
 					Speech.speak("Finalizando o dia", { language: "pt-BR", onDone: handleEndDay })
 				},
 			},
+			{ label: "gravar video", re: /(^|\s)gravar\s+video(\s|$)/, run: startVideoRecording },
 		],
-		[gravarVoz, gravarColeta, corrigir, repetir, handleEndDay],
+		[gravarVoz, gravarColeta, corrigir, repetir, handleEndDay, takePhoto, startVideoRecording],
 	)
 
 	useEffect(() => {
@@ -751,6 +810,12 @@ export default function RecordScreen() {
 					</View>
 				</View>
 			)}
+			<Modal visible={visible} animationType="slide">
+				<View className="flex-1">
+					{photo && <CameraCapture ref={cameraRef} />}
+					{video && <CameraVideoRecorder ref={videoRecorderRef} />}
+				</View>
+			</Modal>
 		</>
 	)
 }
