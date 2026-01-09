@@ -27,6 +27,7 @@ import { buildRecordingName } from "@/lib/fileName"
 import { insertPraga } from "@/database/praga"
 import React from "react"
 import { cameraSave } from "@/lib/cameraSave"
+import { ProjectInfoCard } from "@/components/ProjectInfoCard"
 import { CameraCapture, CameraCaptureRef } from "@/components/CameraCapture"
 import { CameraVideoRecorder, CameraVideoRecorderRef } from "@/components/CameraVideoRecorder"
 
@@ -130,7 +131,7 @@ export default function RecordScreen() {
 	// Permissions
 	const [perm, setPerm] = useState<"undetermined" | "denied" | "granted">("undetermined")
 	useEffect(() => {
-		;(async () => {
+		; (async () => {
 			const res = await getRecordingPermissionsAsync()
 			setPerm(res.status)
 			if (res.status !== "granted" && res.canAskAgain) {
@@ -263,7 +264,7 @@ export default function RecordScreen() {
 			Speech.speak(message, {
 				language: "pt-BR",
 				onDone: () => {
-					;(async () => {
+					; (async () => {
 						await recognizingStart("commands")
 					})()
 				},
@@ -290,7 +291,7 @@ export default function RecordScreen() {
 		Speech.speak("Pode falar alguma coisa", {
 			language: "pt-BR",
 			onDone: () => {
-				;(async () => {
+				; (async () => {
 					await recognizingStop()
 					await recognizingStart("dictation")
 				})()
@@ -304,7 +305,7 @@ export default function RecordScreen() {
 		Speech.speak("Qual anomalia você encontrou?", {
 			language: "pt-BR",
 			onDone: () => {
-				;(async () => {
+				; (async () => {
 					isColetaFlow.current = true
 					await recognizingStop()
 					await recognizingStart("dictation")
@@ -428,7 +429,7 @@ export default function RecordScreen() {
 			Speech.speak("Correção. Qual anomalia você encontrou?", {
 				language: "pt-BR",
 				onDone: () => {
-					;(async () => {
+					; (async () => {
 						transcriptRef.current = ""
 						setResults([])
 						await recognizingStop()
@@ -441,7 +442,7 @@ export default function RecordScreen() {
 			Speech.speak("Correção. O que deseja fazer?", {
 				language: "pt-BR",
 				onDone: () => {
-					;(async () => {
+					; (async () => {
 						await recognizingStart("commands")
 					})()
 				},
@@ -455,7 +456,7 @@ export default function RecordScreen() {
 		Speech.speak(msg, {
 			language: "pt-BR",
 			onDone: () => {
-				;(async () => {
+				; (async () => {
 					if (isColetaFlow.current) {
 						await recognizingStart("dictation")
 					} else {
@@ -742,9 +743,11 @@ export default function RecordScreen() {
 			) : !isDayStarted ? (
 				// ================== START DAY ==================
 				<View className="flex-1 items-center justify-center bg-white p-4">
-					<Text className="text-2xl font-bold mt-14 mb-5">AgroVoice</Text>
+
+					<ProjectInfoCard />
+
 					<TouchableOpacity
-						className="bg-green-400 px-20 py-10 rounded-full shadow-lg elevation-lg"
+						className="bg-green-400 px-20 py-4 rounded-full shadow-lg elevation-lg"
 						onPress={handleStartDay}
 					>
 						<Text className="text-white text-x2 font-bold">INICIAR DIA</Text>
@@ -793,9 +796,8 @@ export default function RecordScreen() {
 							onPress={() => (recognizing ? recognizingStop() : speakCommandVoice())}
 						>
 							<Animated.View
-								className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${
-									recognizing ? "bg-red-500" : ""
-								}`}
+								className={`w-20 h-20 rounded-full bg-green-500 items-center justify-center shadow-lg shadow-black-500/50 elevation-md ${recognizing ? "bg-red-500" : ""
+									}`}
 								style={[animatedStyle]}
 							>
 								{recognizing ? (
